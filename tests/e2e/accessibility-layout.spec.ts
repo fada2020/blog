@@ -39,7 +39,7 @@ async function expectAccessibleNames(page: Page) {
   const elements = [
     page.getByRole("button"),
     page.getByRole("link"),
-    page.locator('img, [role="img"]'),
+    page.locator('img:not([alt=""]), [role="img"]'),
   ];
 
   for (const roleElements of elements) {
