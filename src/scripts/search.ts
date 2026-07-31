@@ -39,7 +39,7 @@ async function setupSearchPanel(panel: HTMLElement): Promise<void> {
     if (!response.ok) throw new Error("검색 인덱스를 불러오지 못했습니다.");
     const entries = (await response.json()) as SearchEntry[];
 
-    input.addEventListener("input", () => {
+    const updateResults = () => {
       const query = input.value.trim().replace(/\s+/g, " ");
       const matches = filterSearchEntries(entries, query);
       renderResults(matches, results);
@@ -51,7 +51,10 @@ async function setupSearchPanel(panel: HTMLElement): Promise<void> {
       } else {
         status.textContent = `검색 결과 ${matches.length}개`;
       }
-    });
+    };
+
+    input.addEventListener("input", updateResults);
+    updateResults();
   } catch {
     status.textContent = "검색을 준비하지 못했습니다. 잠시 후 다시 시도해 주세요.";
   }

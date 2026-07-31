@@ -44,6 +44,29 @@ test("제목과 태그를 검색하고 결과 변경을 알린다", async ({ pag
   );
 });
 
+test("검색 인덱스 응답 전에 입력한 검색어도 준비 직후 처리한다", async ({
+  page,
+}) => {
+  let releaseIndex: () => void = () => {};
+  const indexGate = new Promise<void>((resolve) => {
+    releaseIndex = resolve;
+  });
+
+  await page.route("**/blog/search-index.json", async (route) => {
+    await indexGate;
+    await route.continue();
+  });
+
+  await page.goto("/blog/search/");
+  await page.getByLabel("검색어").fill("Astro");
+  releaseIndex();
+
+  await expect(page.getByRole("status")).toHaveText("검색 결과 1개");
+  await expect(
+    page.getByRole("link", { name: "Astro로 기술 블로그 시작하기" }),
+  ).toBeVisible();
+});
+
 test("데스크톱과 모바일 헤더에서 검색 페이지로 이동한다", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/blog/");
