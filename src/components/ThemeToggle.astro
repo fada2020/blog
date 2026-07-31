@@ -11,6 +11,9 @@
     const nextTheme = root.dataset.theme === "dark" ? "light" : "dark";
     root.dataset.theme = nextTheme;
     localStorage.setItem("theme", nextTheme);
+    window.dispatchEvent(
+      new CustomEvent("themechange", { detail: { theme: nextTheme } }),
+    );
   });
 </script>
 

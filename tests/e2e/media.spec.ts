@@ -42,6 +42,33 @@ test("Mermaid는 모바일 다크 모드에서도 보이고 넘치지 않는다"
   expect(overflow).toBe(false);
 });
 
+test("테마를 전환하면 Mermaid를 새 테마로 다시 렌더링한다", async ({
+  page,
+}) => {
+  await page.goto("/blog/posts/hello-astro/");
+
+  const diagram = page.getByRole("img", { name: "Astro 글 발행 흐름" });
+  const svg = diagram.locator("svg");
+  await expect(svg).toBeVisible();
+
+  const lightMarkup = await svg.evaluate((element) => element.outerHTML);
+  const source = await diagram.locator(".mermaid").getAttribute(
+    "data-mermaid-source",
+  );
+
+  await page.getByRole("button", { name: "테마 전환" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect
+    .poll(() => svg.evaluate((element) => element.outerHTML))
+    .not.toBe(lightMarkup);
+
+  await expect(diagram).toContainText("초안");
+  await expect(diagram).toContainText("GitHub Pages 배포");
+  expect(
+    await diagram.locator(".mermaid").getAttribute("data-mermaid-source"),
+  ).toBe(source);
+});
+
 test("Mermaid 클라이언트 코드는 사용하는 글에서만 로드한다", async ({
   page,
 }) => {
