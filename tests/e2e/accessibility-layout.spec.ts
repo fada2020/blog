@@ -248,6 +248,29 @@ test("데스크톱 비교 표는 본문보다 넓고 셀 여백을 확보한다"
   expect(layout.lineHeight).toBeGreaterThanOrEqual(24);
 });
 
+test("코드 블록은 충분한 내부 여백과 가로 스크롤을 제공한다", async ({ page }) => {
+  await page.setViewportSize(viewports[0]);
+  await page.goto("/blog/posts/nextjs-first-step/");
+
+  const styles = await page.locator(".article-body pre").first().evaluate((element) => {
+    const style = getComputedStyle(element);
+
+    return {
+      paddingInline: Number.parseFloat(style.paddingInlineStart),
+      paddingBlock: Number.parseFloat(style.paddingBlockStart),
+      overflowX: style.overflowX,
+      pageHasNoOverflow:
+        document.documentElement.scrollWidth <=
+        document.documentElement.clientWidth,
+    };
+  });
+
+  expect(styles.paddingInline).toBeGreaterThanOrEqual(18);
+  expect(styles.paddingBlock).toBeGreaterThanOrEqual(16);
+  expect(styles.overflowX).toBe("auto");
+  expect(styles.pageHasNoOverflow).toBe(true);
+});
+
 test("모바일 글 제목은 한 글자 줄 없이 컨테이너 안에서 렌더링된다", async ({
   page,
 }) => {

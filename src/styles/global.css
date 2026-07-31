@@ -181,6 +181,22 @@ a {
   );
 }
 
+.article-body pre:not(.mermaid) {
+  margin: 28px 0;
+  padding: 22px 24px !important;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 14px;
+  line-height: 1.65;
+  tab-size: 2;
+}
+
+.article-body pre:not(.mermaid) code {
+  font-family:
+    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
 @media (max-width: 640px) {
   .site-shell {
     width: min(calc(100% - 32px), var(--content-width));
@@ -210,5 +226,11 @@ a {
   .article-body th,
   .article-body td {
     padding: 16px 18px;
+  }
+
+  .article-body pre:not(.mermaid) {
+    margin-block: 24px;
+    padding: 18px !important;
+    font-size: 13px;
   }
 }
