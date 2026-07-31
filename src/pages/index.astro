@@ -1,24 +1,52 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
+import PostList from "../components/PostList.astro";
+import { getPublishedPosts } from "../lib/posts";
+import { withBase } from "../lib/site";
+
+const posts = await getPublishedPosts();
+const categories = [...new Set(posts.map(({ data }) => data.category))].sort();
 ---
 
 <BaseLayout
   title="Field Notes"
   description="현장에서 배운 기술을 차분하게 기록하는 기술 블로그입니다."
 >
-  <section class="reading-width" aria-labelledby="page-title">
-    <p class="eyebrow">기술 블로그</p>
-    <h1 id="page-title">현장에서 배운 기술을<br />차분하게 기록합니다.</h1>
+  <section class="intro-section" aria-labelledby="page-title">
+    <p class="eyebrow">기술과 운영의 현장 기록</p>
+    <h1 id="page-title">Field Notes</h1>
     <p class="intro">
       Spring Boot 개발자의 시선으로 프런트엔드, 인프라, 관측 가능성을 직접
       부딪히며 정리합니다.
     </p>
   </section>
+
+  <section class="category-section" aria-labelledby="category-title">
+    <h2 id="category-title">카테고리</h2>
+    <nav aria-label="카테고리 탐색">
+      {
+        categories.map((category) => (
+          <a href={withBase(`/categories/${encodeURIComponent(category)}/`)}>
+            {category}
+          </a>
+        ))
+      }
+    </nav>
+  </section>
+
+  <section class="latest-section" aria-labelledby="latest-title">
+    <div class="section-heading">
+      <p class="eyebrow">최근 기록</p>
+      <h2 id="latest-title">새로 쓴 글</h2>
+    </div>
+    <PostList posts={posts} />
+  </section>
 </BaseLayout>
 
 <style>
-  section {
-    padding-block: 8px;
+  .intro-section {
+    width: min(100%, 760px);
+    padding-block: 8px 48px;
   }
 
   .eyebrow {
@@ -30,8 +58,8 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 
   h1 {
     margin: 0;
-    font-size: clamp(34px, 4vw, 52px);
-    line-height: 1.35;
+    font-size: 52px;
+    line-height: 1.2;
     letter-spacing: 0;
   }
 
@@ -42,6 +70,52 @@ import BaseLayout from "../layouts/BaseLayout.astro";
     font-size: 17px;
   }
 
+  .category-section {
+    display: grid;
+    grid-template-columns: 180px minmax(0, 1fr);
+    gap: 24px;
+    align-items: start;
+    padding-block: 24px;
+    border-block: 1px solid var(--color-border);
+  }
+
+  .category-section h2 {
+    margin: 4px 0 0;
+    font-size: 16px;
+  }
+
+  .category-section nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .category-section a {
+    padding: 7px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    color: var(--color-text);
+    font-size: 14px;
+    text-decoration: none;
+  }
+
+  .latest-section {
+    padding-top: 56px;
+  }
+
+  .section-heading {
+    margin-bottom: 20px;
+  }
+
+  .section-heading .eyebrow {
+    margin-bottom: 4px;
+  }
+
+  .section-heading h2 {
+    margin: 0;
+    font-size: 30px;
+  }
+
   @media (max-width: 640px) {
     h1 {
       font-size: 34px;
@@ -49,6 +123,15 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 
     .intro {
       font-size: 16px;
+    }
+
+    .category-section {
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+
+    .latest-section {
+      padding-top: 40px;
     }
   }
 </style>

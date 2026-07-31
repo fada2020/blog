@@ -1,0 +1,118 @@
+---
+import { Image } from "astro:assets";
+import { render } from "astro:content";
+import PostMeta from "../../components/PostMeta.astro";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { getPublishedPosts } from "../../lib/posts";
+
+export async function getStaticPaths() {
+  const posts = await getPublishedPosts();
+  return posts.map((post) => ({
+    params: { id: post.id },
+    props: { post },
+  }));
+}
+
+const { post } = Astro.props;
+const { Content } = await render(post);
+---
+
+<BaseLayout
+  title={post.data.title}
+  description={post.data.description}
+  article
+>
+  <article class="article">
+    <header class="article-header">
+      <PostMeta post={post} />
+      <h1>{post.data.title}</h1>
+      <p class="description">{post.data.description}</p>
+    </header>
+
+    <figure class="hero">
+      <Image
+        src={post.data.heroImage}
+        alt={post.data.heroImageAlt}
+        widths={[760, 1200]}
+        sizes="(max-width: 792px) calc(100vw - 32px), 760px"
+        loading="eager"
+      />
+      {
+        post.data.imageCredit && (
+          <figcaption>
+            출처:{" "}
+            {post.data.imageCredit.url ? (
+              <a href={post.data.imageCredit.url} rel="noreferrer">
+                {post.data.imageCredit.label}
+              </a>
+            ) : (
+              post.data.imageCredit.label
+            )}
+          </figcaption>
+        )
+      }
+    </figure>
+
+    <div class="article-body">
+      <Content />
+    </div>
+  </article>
+</BaseLayout>
+
+<style>
+  .article {
+    width: min(100%, var(--reading-width));
+    margin-inline: auto;
+  }
+
+  .article-header {
+    margin-bottom: 32px;
+  }
+
+  h1 {
+    margin: 16px 0 12px;
+    font-size: 42px;
+    line-height: 1.3;
+    letter-spacing: 0;
+  }
+
+  .description {
+    margin: 0;
+    color: var(--color-muted);
+    font-size: 18px;
+  }
+
+  .hero {
+    margin: 0 0 40px;
+  }
+
+  .hero :global(img) {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1200 / 630;
+    object-fit: cover;
+    border-radius: var(--radius);
+  }
+
+  figcaption {
+    margin-top: 8px;
+    color: var(--color-muted);
+    font-size: 12px;
+  }
+
+  .article-body {
+    font-size: 17px;
+  }
+
+  @media (max-width: 640px) {
+    h1 {
+      font-size: 32px;
+    }
+
+    .description,
+    .article-body {
+      font-size: 16px;
+    }
+  }
+</style>
