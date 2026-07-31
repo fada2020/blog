@@ -1,0 +1,54 @@
+<button class="theme-toggle" type="button" aria-label="테마 전환" title="테마 전환">
+  <span class="theme-icon theme-icon-light" aria-hidden="true">☼</span>
+  <span class="theme-icon theme-icon-dark" aria-hidden="true">◐</span>
+</button>
+
+<script>
+  const button = document.querySelector<HTMLButtonElement>(".theme-toggle");
+
+  button?.addEventListener("click", () => {
+    const root = document.documentElement;
+    const nextTheme = root.dataset.theme === "dark" ? "light" : "dark";
+    root.dataset.theme = nextTheme;
+    localStorage.setItem("theme", nextTheme);
+    window.dispatchEvent(
+      new CustomEvent("themechange", { detail: { theme: nextTheme } }),
+    );
+  });
+</script>
+
+<style>
+  .theme-toggle {
+    display: grid;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    place-items: center;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-surface);
+    color: var(--color-text);
+    cursor: pointer;
+    font: inherit;
+  }
+
+  .theme-toggle:hover {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+  }
+
+  .theme-icon {
+    grid-area: 1 / 1;
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  .theme-icon-dark,
+  :global(:root[data-theme="dark"]) .theme-icon-light {
+    display: none;
+  }
+
+  :global(:root[data-theme="dark"]) .theme-icon-dark {
+    display: block;
+  }
+</style>

@@ -1,0 +1,54 @@
+---
+import SeoHead from "../components/SeoHead.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+import SiteHeader from "../components/SiteHeader.astro";
+import { BASE_PATH } from "../lib/site";
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description: string;
+  image?: string;
+  imageAlt?: string;
+  article?: boolean;
+}
+
+const { title, description, image, imageAlt, article = false } = Astro.props;
+const path = Astro.url.pathname.startsWith(BASE_PATH)
+  ? Astro.url.pathname.slice(BASE_PATH.length) || "/"
+  : Astro.url.pathname;
+---
+
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="generator" content={Astro.generator} />
+    <SeoHead
+      title={title}
+      description={description}
+      path={path}
+      image={image}
+      imageAlt={imageAlt}
+      article={article}
+    />
+    <script is:inline>
+      const savedTheme = localStorage.getItem("theme");
+      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.dataset.theme =
+        savedTheme === "light" || savedTheme === "dark"
+          ? savedTheme
+          : prefersDark
+            ? "dark"
+            : "light";
+    </script>
+  </head>
+  <body>
+    <SiteHeader />
+    <main class="site-main site-shell">
+      <slot />
+    </main>
+    <SiteFooter />
+  </body>
+</html>

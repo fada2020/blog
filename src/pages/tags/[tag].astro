@@ -1,0 +1,53 @@
+---
+import PostList from "../../components/PostList.astro";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { getPublishedPosts } from "../../lib/posts";
+
+export async function getStaticPaths() {
+  const posts = await getPublishedPosts();
+  const tags = [...new Set(posts.flatMap(({ data }) => data.tags))];
+
+  return tags.map((tag) => ({
+    params: { tag },
+    props: {
+      tag,
+      posts: posts.filter(({ data }) => data.tags.includes(tag)),
+    },
+  }));
+}
+
+const { tag, posts } = Astro.props;
+---
+
+<BaseLayout title={`#${tag}`} description={`${tag} 태그의 공개 기술 글입니다.`}>
+  <header class="archive-header">
+    <p>태그</p>
+    <h1>#{tag}</h1>
+    <span>{posts.length}개의 글</span>
+  </header>
+  <PostList posts={posts} />
+</BaseLayout>
+
+<style>
+  .archive-header {
+    margin-bottom: 36px;
+  }
+
+  .archive-header p,
+  .archive-header span {
+    color: var(--color-muted);
+    font-size: 14px;
+  }
+
+  .archive-header p {
+    margin: 0 0 6px;
+    color: var(--color-accent);
+    font-weight: 700;
+  }
+
+  h1 {
+    margin: 0 0 8px;
+    font-size: 40px;
+    letter-spacing: 0;
+  }
+</style>

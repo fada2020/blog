@@ -1,0 +1,71 @@
+---
+import type { CollectionEntry } from "astro:content";
+import { withBase } from "../lib/site";
+
+interface Props {
+  post: CollectionEntry<"blog">;
+}
+
+const { post } = Astro.props;
+const { category, kind, publishedAt, tags } = post.data;
+const kindLabels = {
+  learning: "학습",
+  trend: "트렌드",
+  worklog: "업무 기록",
+  "deep-dive": "심화",
+};
+const formattedDate = new Intl.DateTimeFormat("ko-KR", {
+  dateStyle: "long",
+}).format(publishedAt);
+---
+
+<div class="post-meta">
+  <time datetime={publishedAt.toISOString()}>{formattedDate}</time>
+  <span aria-hidden="true">·</span>
+  <span>{kindLabels[kind]}</span>
+  <span aria-hidden="true">·</span>
+  <a href={withBase(`/categories/${encodeURIComponent(category)}/`)}>{category}</a>
+</div>
+<ul class="tag-list" aria-label="태그">
+  {
+    tags.map((tag) => (
+      <li>
+        <a href={withBase(`/tags/${encodeURIComponent(tag)}/`)}>#{tag}</a>
+      </li>
+    ))
+  }
+</ul>
+
+<style>
+  .post-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    color: var(--color-muted);
+    font-size: 13px;
+  }
+
+  .post-meta a {
+    color: inherit;
+  }
+
+  .tag-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 14px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .tag-list a {
+    display: inline-block;
+    padding: 3px 8px;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    color: var(--color-muted);
+    font-size: 12px;
+    text-decoration: none;
+  }
+</style>
