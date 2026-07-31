@@ -3,36 +3,51 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 import FeaturedPost from "../components/FeaturedPost.astro";
 import PostList from "../components/PostList.astro";
 import { getPublishedPosts } from "../lib/posts";
-import { splitHomePosts, resolveTopicLinks } from "../lib/home";
+import { splitHomePosts } from "../lib/home";
 import type { Category } from "../content.config";
 import { withBase } from "../lib/site";
 
 const posts = await getPublishedPosts();
 const categories = [...new Set(posts.map(({ data }) => data.category))].sort() as Category[];
+const availableCategories = new Set(categories);
 const { featuredPost, latestPosts } = splitHomePosts(posts);
 const topicDefinitions = [
-  { name: "Backend", label: "Backend", description: "안정적인 API와 데이터 흐름" },
-  { name: "Tooling", label: "Frontend", description: "사용자 경험을 만드는 웹 기술" },
-  { name: "DevOps", label: "DevOps", description: "반복 가능한 배포와 인프라" },
   {
-    name: "Observability",
+    label: "Backend",
+    description: "안정적인 API와 데이터 흐름",
+    categoryName: "Backend",
+  },
+  {
+    label: "Frontend",
+    description: "사용자 경험을 만드는 웹 기술",
+    categoryName: "Tooling",
+  },
+  {
+    label: "DevOps",
+    description: "반복 가능한 배포와 인프라",
+    categoryName: "DevOps",
+  },
+  {
     label: "Observability",
     description: "로그, 메트릭, 트레이스로 읽는 운영",
+    categoryName: "Observability",
   },
 ] as const satisfies {
-  name: Category;
   label: string;
   description: string;
+  categoryName?: Category;
 }[];
-const topicLinks = resolveTopicLinks(
-  topicDefinitions.map(({ name }) => name),
-  categories,
-);
-const topics = topicDefinitions.map((topic, index) => ({
+const topics = topicDefinitions.map((topic) => ({
   ...topic,
-  hrefCategory: topic.name === "Tooling" ? undefined : topicLinks[index]?.hrefCategory,
+  hrefCategory:
+    topic.categoryName && availableCategories.has(topic.categoryName) ? topic.categoryName : undefined,
 }));
-const roadmap = ["Next.js", "React Native", "Kotlin", "Flutter"];
+const roadmap = [
+  { label: "Next.js", isCurrent: true },
+  { label: "React Native", isCurrent: false },
+  { label: "Kotlin", isCurrent: false },
+  { label: "Flutter", isCurrent: false },
+];
 const editorialRhythm = [
   { title: "첫 영업일", description: "순차 커리큘럼으로 학습 흐름을 이어갑니다." },
   { title: "둘째 영업일", description: "그 주에 나온 기술 변화를 빠르게 따라갑니다." },
@@ -107,7 +122,10 @@ const editorialRhythm = [
     <ol class="learning-roadmap" aria-label="학습 순서">
       {
         roadmap.map((item) => (
-          <li>{item}</li>
+          <li aria-current={item.isCurrent ? "step" : undefined}>
+            <span>{item.label}</span>
+            {item.isCurrent ? <span class="roadmap-status">현재 단계</span> : null}
+          </li>
         ))
       }
     </ol>
@@ -232,6 +250,10 @@ const editorialRhythm = [
   }
 
   .learning-roadmap li {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 12px;
     min-height: 108px;
     padding: 16px;
     border: 1px solid var(--color-border);
@@ -241,9 +263,19 @@ const editorialRhythm = [
     font-weight: 700;
   }
 
-  .learning-roadmap li:first-child {
+  .learning-roadmap li[aria-current="step"] {
     border-color: var(--color-accent);
     box-shadow: inset 0 0 0 1px var(--color-accent);
+  }
+
+  .roadmap-status {
+    align-self: flex-start;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-accent) 14%, var(--color-surface));
+    color: var(--color-accent);
+    font-size: 12px;
+    font-weight: 700;
   }
 
   .editorial-rhythm {

@@ -31,6 +31,27 @@ test("홈은 대표 글과 매거진 편집 섹션을 표시한다", async ({ pa
   await expect(page.getByText("Flutter")).toBeVisible();
 });
 
+test("홈은 관심 분야 링크 계약과 현재 학습 단계 표식을 유지한다", async ({ page }) => {
+  await page.goto("/blog/");
+
+  const frontendLink = page.getByRole("link", { name: "Frontend", exact: true });
+  await expect(frontendLink).toHaveAttribute("href", "/blog/categories/Tooling/");
+  await expect(page.getByRole("link", { name: "Backend", exact: true })).toHaveCount(0);
+
+  const roadmap = page.getByRole("list", { name: "학습 순서" });
+  const currentStep = roadmap.getByRole("listitem").filter({ hasText: "Next.js" });
+
+  await expect(currentStep).toHaveAttribute("aria-current", "step");
+  await expect(currentStep.getByText("현재 단계")).toBeVisible();
+
+  for (const label of ["React Native", "Kotlin", "Flutter"]) {
+    await expect(roadmap.getByRole("listitem").filter({ hasText: label })).not.toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+  }
+});
+
 test("공개 글이 하나면 최신 글 목록 대신 대기 문구를 표시한다", async ({ page }) => {
   await page.goto("/blog/");
 
