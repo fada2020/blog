@@ -1,52 +1,160 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
+import FeaturedPost from "../components/FeaturedPost.astro";
 import PostList from "../components/PostList.astro";
 import { getPublishedPosts } from "../lib/posts";
+import { splitHomePosts } from "../lib/home";
+import type { Category } from "../content.config";
 import { withBase } from "../lib/site";
 
 const posts = await getPublishedPosts();
-const categories = [...new Set(posts.map(({ data }) => data.category))].sort();
+const categories = [...new Set(posts.map(({ data }) => data.category))].sort() as Category[];
+const availableCategories = new Set(categories);
+const { featuredPost, latestPosts } = splitHomePosts(posts);
+const topicDefinitions = [
+  {
+    label: "Backend",
+    description: "안정적인 API와 데이터 흐름",
+    categoryName: "Backend",
+  },
+  {
+    label: "Frontend",
+    description: "사용자 경험을 만드는 웹 기술",
+    categoryName: "Tooling",
+  },
+  {
+    label: "DevOps",
+    description: "반복 가능한 배포와 인프라",
+    categoryName: "DevOps",
+  },
+  {
+    label: "Observability",
+    description: "로그, 메트릭, 트레이스로 읽는 운영",
+    categoryName: "Observability",
+  },
+] as const satisfies {
+  label: string;
+  description: string;
+  categoryName?: Category;
+}[];
+const topics = topicDefinitions.map((topic) => ({
+  ...topic,
+  hrefCategory:
+    topic.categoryName && availableCategories.has(topic.categoryName) ? topic.categoryName : undefined,
+}));
+const roadmap = [
+  { label: "Next.js", isCurrent: true },
+  { label: "React Native", isCurrent: false },
+  { label: "Kotlin", isCurrent: false },
+  { label: "Flutter", isCurrent: false },
+];
+const editorialRhythm = [
+  { title: "첫 영업일", description: "순차 커리큘럼으로 학습 흐름을 이어갑니다." },
+  { title: "둘째 영업일", description: "그 주에 나온 기술 변화를 빠르게 따라갑니다." },
+  { title: "마지막 영업일", description: "한 주 동안 쓴 기술을 다시 깊게 파고듭니다." },
+];
 ---
 
 <BaseLayout
   title="Field Notes"
   description="현장에서 배운 기술을 차분하게 기록하는 기술 블로그입니다."
 >
-  <section class="intro-section" aria-labelledby="page-title">
-    <p class="eyebrow">기술과 운영의 현장 기록</p>
-    <h1 id="page-title">Field Notes</h1>
-    <p class="intro">
-      Spring Boot 개발자의 시선으로 프런트엔드, 인프라, 관측 가능성을 직접
-      부딪히며 정리합니다.
-    </p>
-  </section>
+  {
+    featuredPost ? (
+      <FeaturedPost post={featuredPost} />
+    ) : (
+      <section class="empty-featured" aria-labelledby="empty-featured-title">
+        <h1 id="empty-featured-title">첫 기록을 준비하고 있습니다</h1>
+        <p>
+          첫 번째 발행 글이 올라오면 기술 매거진형 홈의 대표 글 자리에서 바로
+          소개합니다.
+        </p>
+      </section>
+    )
+  }
 
-  <section class="category-section" aria-labelledby="category-title">
-    <h2 id="category-title">카테고리</h2>
-    <nav aria-label="카테고리 탐색">
+  <section class="topic-section" aria-labelledby="topics-title">
+    <div class="section-heading">
+      <p class="eyebrow">Editorial beats</p>
+      <h2 id="topics-title">관심 분야</h2>
+    </div>
+    <div class="topic-grid">
       {
-        categories.map((category) => (
-          <a href={withBase(`/categories/${encodeURIComponent(category)}/`)}>
-            {category}
-          </a>
+        topics.map((topic) => (
+          <article class="topic-item">
+            <h3>
+              {
+                topic.hrefCategory ? (
+                  <a href={withBase(`/categories/${encodeURIComponent(topic.hrefCategory)}/`)}>
+                    {topic.label}
+                  </a>
+                ) : (
+                  topic.label
+                )
+              }
+            </h3>
+            <p>{topic.description}</p>
+          </article>
         ))
       }
-    </nav>
+    </div>
   </section>
 
   <section class="latest-section" aria-labelledby="latest-title">
     <div class="section-heading">
       <p class="eyebrow">최근 기록</p>
-      <h2 id="latest-title">새로 쓴 글</h2>
+      <h2 id="latest-title">최신 글</h2>
     </div>
-    <PostList posts={posts} />
+    {
+      latestPosts.length > 0 ? (
+        <PostList posts={latestPosts} />
+      ) : (
+        <p class="empty-copy">대표 글 다음 순서의 최신 글을 준비하고 있습니다.</p>
+      )
+    }
+  </section>
+
+  <section class="roadmap-section" aria-labelledby="roadmap-title">
+    <div class="section-heading">
+      <p class="eyebrow">Learning sequence</p>
+      <h2 id="roadmap-title">학습 로드맵</h2>
+    </div>
+    <ol class="learning-roadmap" aria-label="학습 순서">
+      {
+        roadmap.map((item) => (
+          <li aria-current={item.isCurrent ? "step" : undefined}>
+            <span>{item.label}</span>
+            {item.isCurrent ? <span class="roadmap-status">현재 단계</span> : null}
+          </li>
+        ))
+      }
+    </ol>
+  </section>
+
+  <section class="editorial-section" aria-labelledby="editorial-title">
+    <div class="section-heading">
+      <p class="eyebrow">Weekly cadence</p>
+      <h2 id="editorial-title">주간 편집 원칙</h2>
+    </div>
+    <div class="editorial-rhythm">
+      {
+        editorialRhythm.map((item) => (
+          <article>
+            <h3>{item.title}</h3>
+            <p>{item.description}</p>
+          </article>
+        ))
+      }
+    </div>
+    <p class="editorial-note">공휴일을 제외한 영업일 기준으로 주간 발행 흐름을 유지합니다.</p>
   </section>
 </BaseLayout>
 
 <style>
-  .intro-section {
+  .empty-featured {
     width: min(100%, 760px);
-    padding-block: 8px 48px;
+    padding-block: 12px 48px;
+    border-bottom: 1px solid var(--color-border);
   }
 
   .eyebrow {
@@ -56,51 +164,35 @@ const categories = [...new Set(posts.map(({ data }) => data.category))].sort();
     font-weight: 700;
   }
 
-  h1 {
+  .empty-featured h1 {
     margin: 0;
     font-size: 52px;
     line-height: 1.2;
     letter-spacing: 0;
   }
 
-  .intro {
-    max-width: 700px;
-    margin: 18px 0 0;
+  .empty-featured p,
+  .topic-item p,
+  .empty-copy,
+  .editorial-rhythm p,
+  .editorial-note {
+    margin: 0;
     color: var(--color-muted);
+  }
+
+  .empty-featured p {
+    max-width: 640px;
+    margin-top: 18px;
     font-size: 17px;
   }
 
-  .category-section {
-    display: grid;
-    grid-template-columns: 180px minmax(0, 1fr);
-    gap: 24px;
-    align-items: start;
-    padding-block: 24px;
-    border-block: 1px solid var(--color-border);
-  }
-
-  .category-section h2 {
-    margin: 4px 0 0;
-    font-size: 16px;
-  }
-
-  .category-section nav {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-
-  .category-section a {
-    padding: 7px 12px;
-    border: 1px solid var(--color-border);
-    border-radius: 6px;
-    color: var(--color-text);
-    font-size: 14px;
-    text-decoration: none;
-  }
-
-  .latest-section {
-    padding-top: 56px;
+  .topic-section,
+  .latest-section,
+  .roadmap-section,
+  .editorial-section {
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--color-border);
   }
 
   .section-heading {
@@ -116,22 +208,131 @@ const categories = [...new Set(posts.map(({ data }) => data.category))].sort();
     font-size: 30px;
   }
 
+  .topic-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 18px;
+  }
+
+  .topic-item {
+    padding: 18px 0 0;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .topic-item h3,
+  .editorial-rhythm h3 {
+    margin: 0 0 8px;
+    font-size: 18px;
+    line-height: 1.35;
+  }
+
+  .topic-item a {
+    color: var(--color-text);
+    text-decoration: none;
+  }
+
+  .topic-item a:hover {
+    color: var(--color-accent);
+  }
+
+  .empty-copy {
+    padding: 20px 0 0;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .learning-roadmap {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .learning-roadmap li {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 108px;
+    padding: 16px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .learning-roadmap li[aria-current="step"] {
+    border-color: var(--color-accent);
+    box-shadow: inset 0 0 0 1px var(--color-accent);
+  }
+
+  .roadmap-status {
+    align-self: flex-start;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-accent) 14%, var(--color-surface));
+    color: var(--color-accent);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .editorial-rhythm {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+  }
+
+  .editorial-rhythm article {
+    padding-top: 18px;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .editorial-note {
+    margin-top: 16px;
+    font-size: 14px;
+  }
+
+  @media (max-width: 900px) {
+    .topic-grid,
+    .learning-roadmap {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .editorial-rhythm {
+      grid-template-columns: 1fr;
+    }
+  }
+
   @media (max-width: 640px) {
-    h1 {
+    .empty-featured h1 {
       font-size: 34px;
     }
 
-    .intro {
+    .empty-featured p {
       font-size: 16px;
     }
 
-    .category-section {
-      grid-template-columns: 1fr;
-      gap: 14px;
+    .topic-section,
+    .latest-section,
+    .roadmap-section,
+    .editorial-section {
+      margin-top: 40px;
+      padding-top: 20px;
     }
 
-    .latest-section {
-      padding-top: 40px;
+    .topic-grid,
+    .learning-roadmap {
+      grid-template-columns: 1fr;
+    }
+
+    .learning-roadmap li {
+      min-height: 0;
+    }
+
+    .section-heading h2 {
+      font-size: 26px;
     }
   }
 </style>
