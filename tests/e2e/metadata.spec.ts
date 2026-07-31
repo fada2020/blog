@@ -6,6 +6,21 @@ const publicTitle = "Astro로 기술 블로그 시작하기";
 const draftTitle = "작성 중인 배포 점검 메모";
 const articleUrl = "https://fada2020.github.io/blog/posts/hello-astro/";
 
+test("검색엔진 소유권 확인 메타 태그를 제공한다", async ({ page }) => {
+  await page.goto("/blog/");
+
+  await expect(page.locator('meta[name="google-site-verification"]')).toHaveAttribute(
+    "content",
+    "ydsjtjs9ZH3xeU2uVWBHh6ZjLZ8rpkkzbKByvMXkrFE",
+  );
+  await expect(page.locator('meta[name="google-site-verification"]')).toHaveCount(1);
+  await expect(page.locator('meta[name="naver-site-verification"]')).toHaveAttribute(
+    "content",
+    "88fc19b37e359df3980a6bb7c24e5b1d97976bb7",
+  );
+  await expect(page.locator('meta[name="naver-site-verification"]')).toHaveCount(1);
+});
+
 test("글 상세에 canonical과 공유 메타데이터가 있다", async ({ page }) => {
   await page.goto("/blog/posts/hello-astro/");
 
