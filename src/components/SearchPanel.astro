@@ -1,0 +1,96 @@
+---
+import { withBase } from "../lib/site";
+---
+
+<section
+  class="search-panel reading-width"
+  data-search-panel
+  data-index-url={withBase("/search-index.json")}
+>
+  <label for="blog-search">검색어</label>
+  <input
+    id="blog-search"
+    name="query"
+    type="search"
+    placeholder="제목, 설명, 카테고리, 태그 검색"
+    autocomplete="off"
+    data-search-input
+  />
+  <p class="search-status" role="status" aria-live="polite" data-search-status>
+    제목, 설명, 카테고리 또는 태그를 검색해 보세요.
+  </p>
+  <ol class="search-results" data-search-results></ol>
+</section>
+
+<script>
+  import { setupSearchPanels } from "../scripts/search";
+
+  setupSearchPanels();
+</script>
+
+<style>
+  .search-panel {
+    margin-top: 32px;
+  }
+
+  label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  input {
+    width: 100%;
+    min-height: 48px;
+    padding: 11px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font: inherit;
+  }
+
+  input::placeholder {
+    color: var(--color-muted);
+  }
+
+  .search-status {
+    min-height: 26px;
+    margin: 16px 0 24px;
+    color: var(--color-muted);
+  }
+
+  .search-results {
+    display: grid;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .search-results :global(li) {
+    padding-block: 20px;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .search-results :global(a) {
+    color: var(--color-text);
+    font-size: 19px;
+    font-weight: 750;
+    text-decoration: none;
+  }
+
+  .search-results :global(a:hover) {
+    color: var(--color-accent);
+  }
+
+  .search-results :global(p) {
+    margin: 6px 0;
+    color: var(--color-muted);
+  }
+
+  .search-results :global(small) {
+    color: var(--color-muted);
+  }
+</style>
