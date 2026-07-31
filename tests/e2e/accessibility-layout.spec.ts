@@ -232,6 +232,42 @@ test("모바일 글 제목은 한 글자 줄 없이 컨테이너 안에서 렌�
   expect(layout.noHorizontalOverflow).toBe(true);
 });
 
+test("데스크톱 대표 글 제목은 마지막 한 글자만 다음 줄로 떨어지지 않는다", async ({
+  page,
+}) => {
+  await page.setViewportSize(viewports[2]);
+  await page.goto("/blog/");
+
+  const layout = await page.locator("#featured-title").evaluate((heading) => {
+    const walker = document.createTreeWalker(heading, NodeFilter.SHOW_TEXT);
+    const textNode = walker.nextNode();
+    if (!(textNode instanceof Text)) {
+      throw new Error("대표 글 제목의 텍스트 노드를 찾지 못했습니다.");
+    }
+
+    const text = textNode.textContent ?? "";
+    const lines = new Map<number, string>();
+
+    for (let index = 0; index < text.length; index += 1) {
+      const range = document.createRange();
+      range.setStart(textNode, index);
+      range.setEnd(textNode, index + 1);
+      const rect = range.getBoundingClientRect();
+      const top = Math.round(rect.top);
+      lines.set(top, `${lines.get(top) ?? ""}${text[index]}`);
+    }
+
+    return {
+      lines: [...lines.values()].map((line) => line.trim()).filter(Boolean),
+      noHorizontalOverflow: heading.scrollWidth <= heading.clientWidth,
+    };
+  });
+
+  expect(layout.lines.at(-1)).toBeTruthy();
+  expect([...(layout.lines.at(-1) ?? "")].length).toBeGreaterThan(1);
+  expect(layout.noHorizontalOverflow).toBe(true);
+});
+
 test("모바일 홈의 로드맵은 한 열로 세로 배치된다", async ({ page }) => {
   await page.setViewportSize(viewports[0]);
   await page.goto("/blog/");
