@@ -12,4 +12,22 @@ imageCredit:
   label: "AI 생성 이미지"
 ---
 
+import ArticleImage from "../../components/ArticleImage.astro";
+import Mermaid from "../../components/Mermaid.astro";
+import editorialFlow from "../../assets/blog/hello-astro/editorial-flow.webp";
+
 Astro Content Collections를 이용해 글의 메타데이터와 본문을 함께 관리합니다.
+
+<ArticleImage
+  src={editorialFlow}
+  alt="업무일지의 메모가 구조화된 기술 문서로 정리되고 사람의 검토를 거쳐 발행되는 흐름"
+  caption="업무일지에서 검토 가능한 기술 글이 만들어지는 과정"
+  credit="AI 생성 이미지"
+/>
+
+<Mermaid title="Astro 글 발행 흐름">
+{`flowchart LR
+  Draft[초안] --> Review[사람 검토]
+  Review --> Approve[승인]
+  Approve --> Deploy[GitHub Pages 배포]`}
+</Mermaid>

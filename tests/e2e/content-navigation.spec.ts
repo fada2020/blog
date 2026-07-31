@@ -10,9 +10,10 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
     "Astro로 기술 블로그 시작하기",
   );
-  await expect(page.locator("article img")).toHaveAttribute("data-image-component", "true");
-  await expect(page.locator("article img")).toHaveAttribute("src", /^\/blog\/_image/);
-  await expect(page.locator("article img")).toHaveAttribute(
+  const heroImage = page.locator(".hero img");
+  await expect(heroImage).toHaveAttribute("data-image-component", "true");
+  await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
+  await expect(heroImage).toHaveAttribute(
     "alt",
     "어두운 작업 공간에서 코드와 문서가 정돈된 기술 블로그 편집 화면",
   );

@@ -1,0 +1,46 @@
+---
+import { Image } from "astro:assets";
+
+interface Props {
+  src: ImageMetadata;
+  alt: string;
+  caption?: string;
+  credit?: string;
+  creditUrl?: string;
+}
+
+const { src, alt, caption, credit, creditUrl } = Astro.props;
+
+if (!alt.trim()) {
+  throw new Error("ArticleImage의 alt는 비어 있을 수 없습니다.");
+}
+---
+
+<figure class="article-image">
+  <Image
+    src={src}
+    alt={alt}
+    widths={[760, 1200]}
+    sizes="(max-width: 792px) calc(100vw - 32px), 760px"
+    loading="lazy"
+  />
+  {
+    (caption || credit) && (
+      <figcaption>
+        {caption && <span>{caption}</span>}
+        {credit && (
+          <span class="article-image__credit">
+            출처:{" "}
+            {creditUrl ? (
+              <a href={creditUrl} rel="noreferrer">
+                {credit}
+              </a>
+            ) : (
+              credit
+            )}
+          </span>
+        )}
+      </figcaption>
+    )
+  }
+</figure>

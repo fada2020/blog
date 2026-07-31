@@ -1,0 +1,13 @@
+---
+interface Props {
+  title: string;
+}
+
+const { title } = Astro.props;
+---
+
+<div class="mermaid-diagram" role="img" aria-label={title}>
+  <pre class="mermaid"><slot /></pre>
+</div>
+
+<script src="../scripts/mermaid.ts"></script>
