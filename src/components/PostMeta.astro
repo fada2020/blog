@@ -1,5 +1,6 @@
 ---
 import type { CollectionEntry } from "astro:content";
+import { kindLabels } from "../lib/post-kind";
 import { withBase } from "../lib/site";
 
 interface Props {
@@ -8,12 +9,6 @@ interface Props {
 
 const { post } = Astro.props;
 const { category, kind, publishedAt, tags } = post.data;
-const kindLabels = {
-  learning: "학습",
-  trend: "트렌드",
-  worklog: "업무 기록",
-  "deep-dive": "심화",
-};
 const formattedDate = new Intl.DateTimeFormat("ko-KR", {
   dateStyle: "long",
 }).format(publishedAt);
@@ -22,7 +17,7 @@ const formattedDate = new Intl.DateTimeFormat("ko-KR", {
 <div class="post-meta">
   <time datetime={publishedAt.toISOString()}>{formattedDate}</time>
   <span aria-hidden="true">·</span>
-  <span>{kindLabels[kind]}</span>
+  <a href={withBase(`/kinds/${kind}/`)}>{kindLabels[kind]}</a>
   <span aria-hidden="true">·</span>
   <a href={withBase(`/categories/${encodeURIComponent(category)}/`)}>{category}</a>
 </div>

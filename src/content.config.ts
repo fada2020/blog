@@ -4,6 +4,7 @@ import { z } from "astro/zod";
 
 export type Category =
   | "Backend"
+  | "Frontend"
   | "Infrastructure"
   | "DevOps"
   | "Observability"
@@ -22,6 +23,7 @@ const blog = defineCollection({
     draft: z.boolean().default(true),
     category: z.enum([
       "Backend",
+      "Frontend",
       "Infrastructure",
       "DevOps",
       "Observability",
