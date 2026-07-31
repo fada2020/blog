@@ -225,26 +225,32 @@ test("비교 표는 구분선과 헤더를 표시하고 모바일에서 가로 �
   expect(styles.pageHasNoOverflow).toBe(true);
 });
 
-test("데스크톱 비교 표는 본문보다 넓고 셀 여백을 확보한다", async ({ page }) => {
+test("데스크톱 비교 표는 본문 폭에 맞고 내용에 따라 열 너비를 배분한다", async ({
+  page,
+}) => {
   await page.setViewportSize(viewports[2]);
   await page.goto("/blog/posts/nextjs-first-step/");
 
   const layout = await page.getByRole("table").evaluate((table) => {
     const body = table.closest(".article-body")!;
     const cellStyle = getComputedStyle(table.querySelector("td")!);
+    const headerWidths = [...table.querySelectorAll("th")].map(
+      (header) => header.getBoundingClientRect().width,
+    );
 
     return {
       tableWidth: table.getBoundingClientRect().width,
       bodyWidth: body.getBoundingClientRect().width,
+      headerWidths,
       cellPaddingInline: Number.parseFloat(cellStyle.paddingInlineStart),
-      cellPaddingBlock: Number.parseFloat(cellStyle.paddingBlockStart),
       lineHeight: Number.parseFloat(cellStyle.lineHeight),
     };
   });
 
-  expect(layout.tableWidth).toBeGreaterThan(layout.bodyWidth);
-  expect(layout.cellPaddingInline).toBeGreaterThanOrEqual(20);
-  expect(layout.cellPaddingBlock).toBeGreaterThanOrEqual(18);
+  expect(Math.abs(layout.tableWidth - layout.bodyWidth)).toBeLessThanOrEqual(1);
+  expect(layout.headerWidths[1]).toBeLessThan(layout.headerWidths[0]);
+  expect(layout.headerWidths[1]).toBeLessThan(layout.headerWidths[2]);
+  expect(layout.cellPaddingInline).toBeGreaterThanOrEqual(16);
   expect(layout.lineHeight).toBeGreaterThanOrEqual(24);
 });
 

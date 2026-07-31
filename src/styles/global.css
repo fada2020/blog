@@ -119,8 +119,8 @@ a {
 
 .article-body table {
   display: block;
-  width: min(960px, calc(100vw - 48px));
-  margin: 40px 0 40px 50%;
+  width: 100%;
+  margin: 36px 0;
   overflow-x: auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
@@ -128,7 +128,6 @@ a {
   background: var(--color-surface);
   font-size: 15px;
   line-height: 1.65;
-  transform: translateX(-50%);
 }
 
 .article-body thead,
@@ -142,7 +141,7 @@ a {
 
 .article-body th,
 .article-body td {
-  padding: 18px 20px;
+  padding: 18px 16px;
   border-right: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);
   text-align: left;
@@ -161,7 +160,17 @@ a {
 
 .article-body th:first-child,
 .article-body td:first-child {
-  width: 28%;
+  width: 34%;
+}
+
+.article-body th:nth-child(2),
+.article-body td:nth-child(2) {
+  width: 26%;
+}
+
+.article-body th:nth-child(3),
+.article-body td:nth-child(3) {
+  width: 40%;
 }
 
 .article-body th:last-child,
@@ -216,11 +225,8 @@ a {
   }
 
   .article-body table {
-    width: 100%;
     margin-block: 28px;
-    margin-inline: 0;
     font-size: 14px;
-    transform: none;
   }
 
   .article-body th,
