@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 저장소 체크아웃
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Astro 빌드 결과 업로드
         uses: withastro/action@v6
         with:

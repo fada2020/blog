@@ -72,7 +72,7 @@ describe("GitHub Pages 배포 워크플로", () => {
     const deploySteps = workflow.jobs.deploy.steps;
 
     expect(buildSteps).toContainEqual(
-      expect.objectContaining({ uses: "actions/checkout@v6" }),
+      expect.objectContaining({ uses: "actions/checkout@v7" }),
     );
     expect(buildSteps).toContainEqual(
       expect.objectContaining({
