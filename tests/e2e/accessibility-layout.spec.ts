@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const pages = [
   { name: "home", path: "/blog/" },
@@ -12,27 +12,87 @@ const viewports = [
   { name: "desktop", width: 1440, height: 1000 },
 ];
 
-async function expectNamedInteractiveMedia(page: Page) {
-  const unnamedElements = await page
-    .locator("button, img:not([alt]), img[alt=''], [role='img']")
-    .evaluateAll((elements) =>
-      elements
-        .filter((element) => {
-          if (element instanceof HTMLImageElement && element.alt === "") {
-            return !element.closest('[aria-hidden="true"]');
-          }
+function parseRgb(color: string) {
+  const channels = color.match(/[\d.]+/g)?.slice(0, 3).map(Number);
+  if (!channels || channels.length !== 3) {
+    throw new Error(`지원하지 않는 색상 형식: ${color}`);
+  }
+  return channels;
+}
 
-          const name =
-            element.getAttribute("aria-label") ??
-            element.getAttribute("alt") ??
-            element.textContent ??
-            "";
-          return name.trim().length === 0;
-        })
-        .map((element) => element.outerHTML),
-    );
+function contrastRatio(foreground: string, background: string) {
+  const luminance = (color: string) => {
+    const [red, green, blue] = parseRgb(color).map((channel) => {
+      const normalized = channel / 255;
+      return normalized <= 0.04045
+        ? normalized / 12.92
+        : ((normalized + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  };
+  const lighter = Math.max(luminance(foreground), luminance(background));
+  const darker = Math.min(luminance(foreground), luminance(background));
+  return (lighter + 0.05) / (darker + 0.05);
+}
 
-  expect(unnamedElements).toEqual([]);
+async function expectAccessibleNames(page: Page) {
+  const elements = [
+    page.getByRole("button"),
+    page.getByRole("link"),
+    page.getByRole("img"),
+  ];
+
+  for (const roleElements of elements) {
+    for (const element of await roleElements.all()) {
+      await expect(element).toHaveAccessibleName(/.+/);
+    }
+  }
+}
+
+async function expectKeyboardFocusOutline(page: Page, target: Locator) {
+  await page.locator("body").click({ position: { x: 1, y: 1 } });
+
+  for (let index = 0; index < 30; index += 1) {
+    await page.keyboard.press("Tab");
+    if (
+      await target.evaluate(
+        (element) => element === document.activeElement,
+      )
+    ) {
+      const outline = await target.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          style: style.outlineStyle,
+          width: Number.parseFloat(style.outlineWidth),
+        };
+      });
+      expect(outline.style).not.toBe("none");
+      expect(outline.width).toBeGreaterThan(0);
+      return;
+    }
+  }
+
+  throw new Error("키보드 Tab 순서에서 대상 컨트롤을 찾지 못했습니다.");
+}
+
+async function getForegroundAndBackground(target: Locator) {
+  return target.evaluate((element) => {
+    const foreground = getComputedStyle(element).color;
+    let current: Element | null = element;
+
+    while (current) {
+      const background = getComputedStyle(current).backgroundColor;
+      if (!background.endsWith(", 0)") && background !== "transparent") {
+        return { foreground, background };
+      }
+      current = current.parentElement;
+    }
+
+    return {
+      foreground,
+      background: getComputedStyle(document.documentElement).backgroundColor,
+    };
+  });
 }
 
 for (const viewport of viewports) {
@@ -44,24 +104,17 @@ for (const viewport of viewports) {
       await page.goto(route.path);
 
       await expect(page.locator("h1")).toHaveCount(1);
+      await expectAccessibleNames(page);
 
       const emptyLinks = await page.locator("a").evaluateAll((links) =>
         links
           .filter((link) => {
             if (link.closest('[aria-hidden="true"]')) return false;
-
-            const href = link.getAttribute("href")?.trim() ?? "";
-            const name =
-              link.getAttribute("aria-label")?.trim() ??
-              link.textContent?.trim() ??
-              "";
-            return href.length === 0 || name.length === 0;
+            return (link.getAttribute("href")?.trim() ?? "").length === 0;
           })
           .map((link) => link.outerHTML),
       );
       expect(emptyLinks).toEqual([]);
-
-      await expectNamedInteractiveMedia(page);
 
       const hasHorizontalOverflow = await page.evaluate(
         () =>
@@ -69,31 +122,48 @@ for (const viewport of viewports) {
           document.documentElement.clientWidth,
       );
       expect(hasHorizontalOverflow).toBe(false);
-
-      await page.keyboard.press("Tab");
-      const focusStyle = await page.evaluate(() => {
-        const focused = document.activeElement;
-        if (!(focused instanceof HTMLElement)) return null;
-        const style = getComputedStyle(focused);
-        return {
-          tag: focused.tagName,
-          outlineStyle: style.outlineStyle,
-          outlineWidth: style.outlineWidth,
-        };
-      });
-      expect(focusStyle?.tag).not.toBe("BODY");
-      expect(focusStyle?.outlineStyle).not.toBe("none");
-      expect(focusStyle?.outlineWidth).not.toBe("0px");
     });
   }
 }
 
-test("모바일 메뉴를 키보드로 열고 닫는다", async ({ page }) => {
+test("홈의 주요 링크와 테마 버튼에 키보드 초점이 표시된다", async ({ page }) => {
+  await page.setViewportSize(viewports[2]);
+  await page.goto("/blog/");
+
+  await expectKeyboardFocusOutline(page, page.getByRole("link", { name: "Field Notes" }));
+  await expectKeyboardFocusOutline(
+    page,
+    page.getByRole("link", { name: "Astro로 기술 블로그 시작하기" }),
+  );
+  await expectKeyboardFocusOutline(page, page.getByRole("button", { name: "테마 전환" }));
+});
+
+test("글의 주요 링크와 테마 버튼에 키보드 초점이 표시된다", async ({ page }) => {
+  await page.setViewportSize(viewports[2]);
+  await page.goto("/blog/posts/hello-astro/");
+
+  await expectKeyboardFocusOutline(page, page.getByRole("link", { name: "Field Notes" }));
+  await expectKeyboardFocusOutline(page, page.getByRole("link", { name: "Tooling" }).first());
+  await expectKeyboardFocusOutline(page, page.getByRole("button", { name: "테마 전환" }));
+});
+
+test("검색의 주요 링크, 입력창과 테마 버튼에 키보드 초점이 표시된다", async ({
+  page,
+}) => {
+  await page.setViewportSize(viewports[2]);
+  await page.goto("/blog/search/");
+
+  await expectKeyboardFocusOutline(page, page.getByRole("link", { name: "Field Notes" }));
+  await expectKeyboardFocusOutline(page, page.getByRole("searchbox", { name: "검색어" }));
+  await expectKeyboardFocusOutline(page, page.getByRole("button", { name: "테마 전환" }));
+});
+
+test("모바일 메뉴를 키보드로 열고 닫으며 초점을 표시한다", async ({ page }) => {
   await page.setViewportSize(viewports[0]);
   await page.goto("/blog/");
 
   const menu = page.getByRole("button", { name: "메뉴 열기" });
-  await menu.focus();
+  await expectKeyboardFocusOutline(page, menu);
   await page.keyboard.press("Enter");
   await expect(page.getByRole("navigation", { name: "모바일 주요 메뉴" })).toBeVisible();
   await expect(page.getByRole("button", { name: "메뉴 닫기" })).toHaveAttribute(
@@ -126,15 +196,46 @@ test("긴 글 콘텐츠와 Mermaid가 모바일 본문을 넘지 않는다", asy
   expect(overflowingElements).toEqual([]);
 });
 
-test("모바일 글 제목은 한국어 어절 중간에서 끊지 않는다", async ({ page }) => {
+test("모바일 글 제목은 한 글자 줄 없이 컨테이너 안에서 렌더링된다", async ({
+  page,
+}) => {
   await page.setViewportSize(viewports[0]);
   await page.goto("/blog/posts/hello-astro/");
 
-  await expect(page.locator("h1")).toHaveCSS("word-break", "keep-all");
+  const layout = await page.locator("h1").evaluate((heading) => {
+    const text = heading.textContent ?? "";
+    const lines = new Map<number, string>();
+
+    for (let index = 0; index < text.length; index += 1) {
+      const range = document.createRange();
+      range.setStart(heading.firstChild!, index);
+      range.setEnd(heading.firstChild!, index + 1);
+      const rect = range.getBoundingClientRect();
+      const top = Math.round(rect.top);
+      lines.set(top, `${lines.get(top) ?? ""}${text[index]}`);
+    }
+
+    const headingRect = heading.getBoundingClientRect();
+    const containerRect = heading.parentElement!.getBoundingClientRect();
+    return {
+      lines: [...lines.values()].map((line) => line.trim()).filter(Boolean),
+      insideContainer:
+        headingRect.left >= containerRect.left &&
+        headingRect.right <= containerRect.right,
+      noHorizontalOverflow: heading.scrollWidth <= heading.clientWidth,
+    };
+  });
+
+  expect(layout.lines.length).toBeGreaterThan(1);
+  expect(layout.lines.every((line) => [...line].length > 1)).toBe(true);
+  expect(layout.insideContainer).toBe(true);
+  expect(layout.noHorizontalOverflow).toBe(true);
 });
 
 for (const theme of ["light", "dark"] as const) {
-  test(`${theme} 테마에서 주요 화면을 읽을 수 있다`, async ({ page }) => {
+  test(`${theme} 테마의 본문, 링크와 버튼은 WCAG 명암비를 만족한다`, async ({
+    page,
+  }) => {
     await page.addInitScript((selectedTheme) => {
       localStorage.setItem("theme", selectedTheme);
     }, theme);
@@ -143,14 +244,18 @@ for (const theme of ["light", "dark"] as const) {
       await page.goto(route.path);
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
 
-      const colors = await page.evaluate(() => {
-        const body = getComputedStyle(document.body);
-        return {
-          background: body.backgroundColor,
-          text: body.color,
-        };
-      });
-      expect(colors.background).not.toBe(colors.text);
+      const targets = [
+        page.getByRole("main"),
+        page.getByRole("link", { name: "Field Notes" }),
+        page.getByRole("button", { name: "테마 전환" }),
+      ];
+      for (const target of targets) {
+        const { foreground, background } = await getForegroundAndBackground(target);
+        expect(
+          contrastRatio(foreground, background),
+          `${route.name} ${target} 명암비`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
     }
   });
 }
