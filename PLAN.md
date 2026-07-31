@@ -307,6 +307,7 @@ src/content/blog/
 
 - 핵심 운영 정책과 편성 설계 완료
 - Phase 1 Astro 블로그 구현과 자동 검증 완료
+- 기술 매거진형 홈 반응형 보강 완료, 390px/768px/1440px E2E와 수동 캡처 검증 완료
 - GitHub Pages `/blog/` 배포 워크플로 구성 완료
 - 수동 승인 정책을 유지한 상태로 Phase 1 PR 검토 준비 완료
 - 다음 단계는 Phase 1 PR 승인과 배포 확인 후 Phase 2 승인형 생성 구현

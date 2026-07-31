@@ -93,6 +93,11 @@ const { post } = Astro.props;
     color: var(--color-accent);
   }
 
+  h1 a:focus-visible,
+  .read-link:focus-visible {
+    color: var(--color-accent);
+  }
+
   .sr-only {
     position: absolute;
     width: 1px;
@@ -106,6 +111,16 @@ const { post } = Astro.props;
   }
 
   @media (max-width: 900px) {
+    .featured-story {
+      gap: 24px;
+    }
+
+    h1 {
+      font-size: 38px;
+    }
+  }
+
+  @media (max-width: 640px) {
     .featured-story {
       grid-template-columns: 1fr;
       gap: 22px;

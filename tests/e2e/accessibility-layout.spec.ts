@@ -232,6 +232,93 @@ test("모바일 글 제목은 한 글자 줄 없이 컨테이너 안에서 렌�
   expect(layout.noHorizontalOverflow).toBe(true);
 });
 
+test("모바일 홈의 로드맵은 한 열로 세로 배치된다", async ({ page }) => {
+  await page.setViewportSize(viewports[0]);
+  await page.goto("/blog/");
+
+  const roadmap = page.getByRole("list", { name: "학습 순서" });
+  await expect(roadmap).toBeVisible();
+
+  const itemPositions = await roadmap.getByRole("listitem").evaluateAll((items) =>
+    items.map((item) => {
+      const rect = item.getBoundingClientRect();
+      return {
+        left: Math.round(rect.left),
+        top: Math.round(rect.top),
+      };
+    }),
+  );
+
+  expect(new Set(itemPositions.map(({ left }) => left)).size).toBe(1);
+  expect(itemPositions.every((item, index, all) => index === 0 || item.top > all[index - 1].top)).toBe(
+    true,
+  );
+});
+
+test("홈 대표 글과 관심 분야는 반응형 열 수를 유지한다", async ({ page }) => {
+  await page.setViewportSize(viewports[1]);
+  await page.goto("/blog/");
+
+  const tabletLayout = await page.evaluate(() => {
+    const columnsFor = (selector: string) => {
+      const element = document.querySelector<HTMLElement>(selector);
+      if (!element) {
+        throw new Error(`${selector} 요소를 찾지 못했습니다.`);
+      }
+
+      const children = [...element.children].filter(
+        (child): child is HTMLElement =>
+          child instanceof HTMLElement &&
+          getComputedStyle(child).position !== "absolute" &&
+          child.getBoundingClientRect().width > 0 &&
+          child.getBoundingClientRect().height > 0,
+      );
+      const lefts = children.map((child) => Math.round(child.getBoundingClientRect().left));
+      return new Set(lefts).size;
+    };
+
+    return {
+      featuredColumns: columnsFor(".featured-story"),
+      topicColumns: columnsFor(".topic-grid"),
+    };
+  });
+
+  expect(tabletLayout.featuredColumns).toBe(2);
+  expect(tabletLayout.topicColumns).toBe(2);
+
+  await page.setViewportSize(viewports[2]);
+  await page.goto("/blog/");
+
+  const desktopLayout = await page.evaluate(() => {
+    const columnsFor = (selector: string) => {
+      const element = document.querySelector<HTMLElement>(selector);
+      if (!element) {
+        throw new Error(`${selector} 요소를 찾지 못했습니다.`);
+      }
+
+      const children = [...element.children].filter(
+        (child): child is HTMLElement =>
+          child instanceof HTMLElement &&
+          getComputedStyle(child).position !== "absolute" &&
+          child.getBoundingClientRect().width > 0 &&
+          child.getBoundingClientRect().height > 0,
+      );
+      const lefts = children.map((child) => Math.round(child.getBoundingClientRect().left));
+      return new Set(lefts).size;
+    };
+
+    return {
+      featuredColumns: columnsFor(".featured-story"),
+      topicColumns: columnsFor(".topic-grid"),
+      editorialColumns: columnsFor(".editorial-rhythm"),
+    };
+  });
+
+  expect(desktopLayout.featuredColumns).toBe(2);
+  expect(desktopLayout.topicColumns).toBe(4);
+  expect(desktopLayout.editorialColumns).toBe(3);
+});
+
 for (const theme of ["light", "dark"] as const) {
   test(`${theme} 테마의 본문, 링크와 버튼은 WCAG 명암비를 만족한다`, async ({
     page,
