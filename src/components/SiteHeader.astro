@@ -1,0 +1,67 @@
+---
+import { withBase } from "../lib/site";
+import ThemeToggle from "./ThemeToggle.astro";
+---
+
+<header class="site-header">
+  <div class="site-shell header-inner">
+    <a class="site-title" href={withBase("/")}>Field Notes</a>
+    <nav aria-label="주요 메뉴">
+      <a href={withBase("/")}>글 목록</a>
+      <a href={withBase("/categories/")}>카테고리</a>
+      <a href={withBase("/tags/")}>태그</a>
+    </nav>
+    <ThemeToggle />
+  </div>
+</header>
+
+<style>
+  .site-header {
+    height: 72px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface);
+  }
+
+  .header-inner {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 24px;
+    align-items: center;
+    height: 100%;
+  }
+
+  .site-title {
+    color: var(--color-text);
+    font-size: 22px;
+    font-weight: 750;
+    text-decoration: none;
+  }
+
+  nav {
+    display: flex;
+    gap: 24px;
+    align-items: center;
+  }
+
+  nav a {
+    color: var(--color-muted);
+    font-size: 14px;
+    font-weight: 650;
+    text-decoration: none;
+  }
+
+  nav a:hover {
+    color: var(--color-accent);
+  }
+
+  @media (max-width: 640px) {
+    .header-inner {
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+    }
+
+    nav {
+      display: none;
+    }
+  }
+</style>
