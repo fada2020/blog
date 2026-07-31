@@ -1,12 +1,18 @@
 import type { CollectionEntry } from "astro:content";
 
-export function splitHomePosts(posts: CollectionEntry<"blog">[]) {
-  const [featuredPost, ...latestPosts] = posts;
+import type { Category } from "../content.config";
+import { isPublishedPost, sortPostsNewestFirst } from "./posts";
+
+export function splitHomePosts(posts: CollectionEntry<"blog">[], now = new Date()) {
+  const publishedPosts = sortPostsNewestFirst(
+    posts.filter(({ data }) => isPublishedPost(data, now)),
+  );
+  const [featuredPost, ...latestPosts] = publishedPosts;
 
   return { featuredPost, latestPosts };
 }
 
-export function resolveTopicLinks(topics: string[], categories: string[]) {
+export function resolveTopicLinks(topics: Category[], categories: Category[]) {
   const available = new Set(categories);
 
   return topics.map((name) => ({
