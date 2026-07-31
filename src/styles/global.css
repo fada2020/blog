@@ -117,6 +117,86 @@ a {
   margin-inline: auto;
 }
 
+.article-body table {
+  display: block;
+  width: min(960px, calc(100vw - 48px));
+  margin: 40px 0 40px 50%;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  border-spacing: 0;
+  background: var(--color-surface);
+  font-size: 15px;
+  line-height: 1.65;
+  transform: translateX(-50%);
+}
+
+.article-body thead,
+.article-body tbody {
+  display: table;
+  width: 100%;
+  min-width: 760px;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.article-body th,
+.article-body td {
+  padding: 18px 20px;
+  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.article-body th {
+  background: color-mix(
+    in srgb,
+    var(--color-accent) 12%,
+    var(--color-surface)
+  );
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.article-body th:first-child,
+.article-body td:first-child {
+  width: 28%;
+}
+
+.article-body th:last-child,
+.article-body td:last-child {
+  border-right: 0;
+}
+
+.article-body tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.article-body tbody tr:nth-child(even) {
+  background: color-mix(
+    in srgb,
+    var(--color-bg) 65%,
+    var(--color-surface)
+  );
+}
+
+.article-body pre:not(.mermaid) {
+  margin: 28px 0;
+  padding: 22px 24px !important;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 14px;
+  line-height: 1.65;
+  tab-size: 2;
+}
+
+.article-body pre:not(.mermaid) code {
+  font-family:
+    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
 @media (max-width: 640px) {
   .site-shell {
     width: min(calc(100% - 32px), var(--content-width));
@@ -133,5 +213,24 @@ a {
 
   .mermaid-diagram {
     padding: 16px;
+  }
+
+  .article-body table {
+    width: 100%;
+    margin-block: 28px;
+    margin-inline: 0;
+    font-size: 14px;
+    transform: none;
+  }
+
+  .article-body th,
+  .article-body td {
+    padding: 16px 18px;
+  }
+
+  .article-body pre:not(.mermaid) {
+    margin-block: 24px;
+    padding: 18px !important;
+    font-size: 13px;
   }
 }
