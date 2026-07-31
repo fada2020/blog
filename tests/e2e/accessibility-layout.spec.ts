@@ -196,6 +196,35 @@ test("긴 글 콘텐츠와 Mermaid가 모바일 본문을 넘지 않는다", asy
   expect(overflowingElements).toEqual([]);
 });
 
+test("비교 표는 구분선과 헤더를 표시하고 모바일에서 가로 스크롤된다", async ({
+  page,
+}) => {
+  await page.setViewportSize(viewports[0]);
+  await page.goto("/blog/posts/nextjs-first-step/");
+
+  const table = page.getByRole("table");
+  const styles = await table.evaluate((element) => {
+    const tableStyle = getComputedStyle(element);
+    const headerStyle = getComputedStyle(element.querySelector("th")!);
+
+    return {
+      borderTopWidth: tableStyle.borderTopWidth,
+      headerBackground: headerStyle.backgroundColor,
+      overflowX: tableStyle.overflowX,
+      tableScrolls: element.scrollWidth > element.clientWidth,
+      pageHasNoOverflow:
+        document.documentElement.scrollWidth <=
+        document.documentElement.clientWidth,
+    };
+  });
+
+  expect(styles.borderTopWidth).not.toBe("0px");
+  expect(styles.headerBackground).not.toBe("rgba(0, 0, 0, 0)");
+  expect(styles.overflowX).toBe("auto");
+  expect(styles.tableScrolls).toBe(true);
+  expect(styles.pageHasNoOverflow).toBe(true);
+});
+
 test("모바일 글 제목은 한 글자 줄 없이 컨테이너 안에서 렌더링된다", async ({
   page,
 }) => {
