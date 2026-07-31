@@ -1,5 +1,5 @@
 ---
-import { Image } from "astro:assets";
+import { getImage, Image } from "astro:assets";
 import { render } from "astro:content";
 import PostMeta from "../../components/PostMeta.astro";
 import BaseLayout from "../../layouts/BaseLayout.astro";
@@ -15,11 +15,19 @@ export async function getStaticPaths() {
 
 const { post } = Astro.props;
 const { Content } = await render(post);
+const socialImage = await getImage({
+  src: post.data.heroImage,
+  width: 1200,
+  height: 630,
+  format: "webp",
+});
 ---
 
 <BaseLayout
   title={post.data.title}
   description={post.data.description}
+  image={socialImage.src}
+  imageAlt={post.data.heroImageAlt}
   article
 >
   <article class="article">

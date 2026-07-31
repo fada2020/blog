@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "astro dev",
-    "build": "astro check && astro build",
+    "build": "astro check && astro build && node scripts/verify-public-output.mjs",
     "preview": "astro preview",
     "test": "vitest run",
     "test:e2e": "playwright test"
