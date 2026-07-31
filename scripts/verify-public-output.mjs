@@ -28,8 +28,12 @@ for (const file of contentFiles) {
   const publishedAt = new Date(frontmatter.publishedAt).getTime();
 
   if (frontmatter.draft || !Number.isFinite(publishedAt) || publishedAt > now) {
+    const relativePath = path.relative(contentDir, file);
     unpublished.push({
-      id: path.basename(file, path.extname(file)),
+      id: relativePath
+        .split(path.sep)
+        .join("/")
+        .replace(/\.(md|mdx)$/, ""),
       title: String(frontmatter.title ?? ""),
     });
   }
