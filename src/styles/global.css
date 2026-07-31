@@ -117,6 +117,68 @@ a {
   margin-inline: auto;
 }
 
+.article-body table {
+  display: block;
+  width: 100%;
+  margin: 32px 0;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  border-spacing: 0;
+  background: var(--color-surface);
+  font-size: 15px;
+}
+
+.article-body thead,
+.article-body tbody {
+  display: table;
+  width: 100%;
+  min-width: 680px;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.article-body th,
+.article-body td {
+  padding: 14px 16px;
+  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.article-body th {
+  background: color-mix(
+    in srgb,
+    var(--color-accent) 12%,
+    var(--color-surface)
+  );
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.article-body th:first-child,
+.article-body td:first-child {
+  width: 26%;
+}
+
+.article-body th:last-child,
+.article-body td:last-child {
+  border-right: 0;
+}
+
+.article-body tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.article-body tbody tr:nth-child(even) {
+  background: color-mix(
+    in srgb,
+    var(--color-bg) 65%,
+    var(--color-surface)
+  );
+}
+
 @media (max-width: 640px) {
   .site-shell {
     width: min(calc(100% - 32px), var(--content-width));
@@ -133,5 +195,15 @@ a {
 
   .mermaid-diagram {
     padding: 16px;
+  }
+
+  .article-body table {
+    margin-block: 28px;
+    font-size: 14px;
+  }
+
+  .article-body th,
+  .article-body td {
+    padding: 12px 14px;
   }
 }
