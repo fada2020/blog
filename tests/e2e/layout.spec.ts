@@ -31,3 +31,18 @@ test("모바일에서 가로 스크롤이 생기지 않는다", async ({ page })
   );
   expect(overflow).toBe(false);
 });
+
+test("모바일 메뉴에서 카테고리와 태그로 이동할 수 있다", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/blog/");
+
+  await expect(page.getByRole("button", { name: "메뉴 열기" })).toBeVisible();
+  await page.getByRole("button", { name: "메뉴 열기" }).click();
+
+  await expect(page.getByRole("link", { name: "카테고리" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "태그" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "메뉴 닫기" })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
+});
