@@ -241,6 +241,7 @@ test("데스크톱 비교 표는 본문 폭에 맞고 내용에 따라 열 너�
     return {
       tableWidth: table.getBoundingClientRect().width,
       bodyWidth: body.getBoundingClientRect().width,
+      tableScrolls: table.scrollWidth > table.clientWidth,
       headerWidths,
       cellPaddingInline: Number.parseFloat(cellStyle.paddingInlineStart),
       lineHeight: Number.parseFloat(cellStyle.lineHeight),
@@ -248,6 +249,7 @@ test("데스크톱 비교 표는 본문 폭에 맞고 내용에 따라 열 너�
   });
 
   expect(Math.abs(layout.tableWidth - layout.bodyWidth)).toBeLessThanOrEqual(1);
+  expect(layout.tableScrolls).toBe(false);
   expect(layout.headerWidths[1]).toBeLessThan(layout.headerWidths[0]);
   expect(layout.headerWidths[1]).toBeLessThan(layout.headerWidths[2]);
   expect(layout.cellPaddingInline).toBeGreaterThanOrEqual(16);

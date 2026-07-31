@@ -134,7 +134,6 @@ a {
 .article-body tbody {
   display: table;
   width: 100%;
-  min-width: 760px;
   table-layout: fixed;
   border-collapse: collapse;
 }
@@ -227,6 +226,11 @@ a {
   .article-body table {
     margin-block: 28px;
     font-size: 14px;
+  }
+
+  .article-body thead,
+  .article-body tbody {
+    min-width: 760px;
   }
 
   .article-body th,
