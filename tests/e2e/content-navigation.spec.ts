@@ -3,7 +3,6 @@ import { expect, test } from "@playwright/test";
 test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
   await page.goto("/blog/");
 
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Field Notes");
   await page.getByRole("link", { name: "Astro로 기술 블로그 시작하기" }).click();
 
   await expect(page).toHaveURL(/\/blog\/posts\/hello-astro\/$/);
@@ -19,18 +18,29 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
   );
 });
 
-test("글 목록은 카드마다 접근 가능한 상세 링크를 하나만 노출한다", async ({ page }) => {
+test("홈은 대표 글과 매거진 편집 섹션을 표시한다", async ({ page }) => {
   await page.goto("/blog/");
 
-  const article = page.locator(".post-list article").filter({
-    hasText: "Astro로 기술 블로그 시작하기",
-  });
-  const detailLinks = article
-    .getByRole("link")
-    .and(article.locator('a[href="/blog/posts/hello-astro/"]'));
+  await expect(page.getByRole("region", { name: "대표 글" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "관심 분야" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "학습 로드맵" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "주간 편집 원칙" })).toBeVisible();
+  await expect(page.getByText("Next.js")).toBeVisible();
+  await expect(page.getByText("React Native")).toBeVisible();
+  await expect(page.getByText("Kotlin")).toBeVisible();
+  await expect(page.getByText("Flutter")).toBeVisible();
+});
 
-  await expect(detailLinks).toHaveCount(1);
-  await expect(detailLinks).toHaveAccessibleName("Astro로 기술 블로그 시작하기");
+test("공개 글이 하나면 최신 글 목록 대신 대기 문구를 표시한다", async ({ page }) => {
+  await page.goto("/blog/");
+
+  await expect(page.locator(".post-list")).toHaveCount(0);
+  await expect(page.getByText("대표 글 다음 순서의 최신 글을 준비하고 있습니다.")).toBeVisible();
+  await expect(
+    page.locator(".featured-story").getByRole("link", {
+      name: "Astro로 기술 블로그 시작하기",
+    }),
+  ).toBeVisible();
 });
 
 test("카테고리와 태그로 공개 글을 탐색할 수 있다", async ({ page }) => {
