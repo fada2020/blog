@@ -15,10 +15,15 @@ const { posts } = Astro.props;
   {
     posts.map((post) => (
       <article class="post-card">
-        <a class="cover-link" href={withBase(`/posts/${post.id}/`)} tabindex="-1">
+        <a
+          class="cover-link"
+          href={withBase(`/posts/${post.id}/`)}
+          tabindex="-1"
+          aria-hidden="true"
+        >
           <Image
             src={post.data.heroImage}
-            alt={post.data.heroImageAlt}
+            alt=""
             widths={[420, 720]}
             sizes="(max-width: 640px) calc(100vw - 32px), 320px"
             loading="lazy"
