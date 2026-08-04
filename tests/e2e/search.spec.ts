@@ -5,14 +5,16 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(5);
+  expect(entries).toHaveLength(6);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "2026년 8월 첫째 주 IT 기술동향: 보안 릴리스, AI 개발도구와 클라우드 운영 변화",
+    "벌크 API 회고: 한 항목의 실패가 전체 요청을 망치지 않게 하기",
   );
-  expect(entries[0].href).toBe("/blog/posts/weekly-it-trends-2026-08-04/");
+  expect(entries[0].href).toBe(
+    "/blog/posts/bulk-api-partial-failure-retrospective-2026-08-04/",
+  );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });
 
