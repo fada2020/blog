@@ -43,7 +43,7 @@
 | 영업일 순서 | 콘텐츠 |
 |---|---|
 | 첫 번째 | 순차 학습 트랙 |
-| 두 번째 | 최근 7일 기술 동향 |
+| 두 번째 | 최근 7일 전체 IT 기술 동향 |
 | 중간 | 업무일지 기반 실무 회고 |
 | 마지막 | 해당 주 기술 심화 |
 
@@ -100,20 +100,37 @@ Next.js -> React Native -> Kotlin -> Flutter
 - 글 상단에 검증일, 기준 버전과 공식 문서 링크를 명시한다.
 - 발행 전 최신 안정 버전이 달라졌다면 본문과 예제를 다시 검토한다.
 
-## 5. 기술 동향
+## 5. 전체 IT 기술 동향
 
 - 최근 7일 안에 공식 발표된 내용만 사용한다.
 - 공식 문서, 릴리스 노트와 공식 GitHub 저장소를 우선한다.
+- 특정 학습 트랙이나 현재 작성 중인 주제에 종속하지 않고 전체 IT 업계를 먼저 넓게 훑는다.
 - 루머와 출처가 불분명한 내용은 제외한다.
 - 버전, 발표일, 지원 상태, 실무 영향과 적용 필요 여부를 명시한다.
 - 중요한 소식이 없으면 개수를 억지로 채우지 않는다.
+- 한 편은 기본적으로 3~5개 공식 발표를 묶은 브리핑으로 작성한다.
+- 단일 주제를 깊게 다루는 경우는 업계 영향이 크거나 보안·호환성 영향이 명확할 때로 제한한다.
+- 같은 생태계나 제품을 2회 연속 기술 동향 주제로 고르지 않는다. 예외는 주요 보안 권고, 장기 지원 종료, 대규모 호환성 변경처럼 즉시 대응이 필요한 경우다.
 
-주제 비중은 다음을 기본으로 한다.
+매주 다음 영역을 먼저 스캔한다.
 
-- 70%: Kotlin, Java, Spring Boot, Next.js, AWS, Docker, Terraform, PostgreSQL,
-  Redis, Elasticsearch와 Grafana 등 현재 사용하는 기술
-- 20%: React, TypeScript, CI/CD, OpenTelemetry, 보안과 데이터베이스 등 인접 기술
-- 10%: 새롭게 주목할 런타임, 개발 도구와 AI 개발 워크플로우
+- AI와 개발 워크플로우: 모델, 에이전트, IDE, 코드 리뷰, 테스트 자동화, 온디바이스 AI
+- 언어와 런타임: Java, Kotlin, JavaScript, TypeScript, Python, Go, Rust, Swift, JVM, Node.js, Deno, Bun
+- 프레임워크와 플랫폼: Spring, React, Next.js, Vue, Svelte, React Native, Flutter, Android, iOS, Django, Rails
+- 클라우드와 인프라: AWS, GCP, Azure, Docker, Kubernetes, Terraform, CI/CD, 서버리스
+- 데이터와 운영: PostgreSQL, MySQL, Redis, Elasticsearch, Kafka, OpenTelemetry, Grafana, 보안 권고
+- 산업 이슈: 라이선스, 가격 정책, 표준 변경, 공급망 보안, 브라우저·모바일 플랫폼 정책
+
+선정 기준은 다음 순서로 적용한다.
+
+1. 공식 발표일이 최근 7일 이내인가
+2. 안정 버전, 정식 출시, 보안 권고 또는 명확한 정책 변경인가
+3. Java/Spring Boot 개발자가 3개월 안에 알아야 할 실무 영향이 있는가
+4. 기존 블로그의 최근 글과 생태계가 겹치지 않는가
+5. 단순 버전 업데이트보다 방향 변화, 호환성 변화, 도입 판단 근거를 설명할 수 있는가
+
+현재 사용하는 기술은 독자의 이해를 돕는 비교 기준으로 사용하되, 주제 선정 범위를
+Kotlin, Java, Spring Boot, Next.js, AWS 등으로 제한하지 않는다.
 
 ## 6. 업무일지 기반 실무 회고
 

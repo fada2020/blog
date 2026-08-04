@@ -52,6 +52,25 @@ draft: true
 목록, 검색, RSS, Sitemap, 정적 HTML에서 제외됩니다. 검토와 승인까지 끝난
 글만 `draft: false`로 변경합니다.
 
+## 광고
+
+광고는 홈 하단과 글 상세 하단에 Kakao AdFit 기본 슬롯으로 표시됩니다.
+페이지별 제공자는 `google`, `kakao` 중 하나만 지정합니다. 광고를 끄려면
+해당 페이지의 provider를 `off`로 설정합니다.
+
+```bash
+PUBLIC_HOME_AD_PROVIDER=off
+PUBLIC_ARTICLE_AD_PROVIDER=kakao
+PUBLIC_GOOGLE_ADSENSE_CLIENT=ca-pub-...
+PUBLIC_GOOGLE_ADSENSE_ARTICLE_SLOT=...
+PUBLIC_KAKAO_ADFIT_HOME_UNIT=DAN-DEyO01RLXs86EFR1
+PUBLIC_KAKAO_ADFIT_ARTICLE_UNIT=DAN-DEyO01RLXs86EFR1
+```
+
+Kakao AdFit 고정 크기가 필요하면 `PUBLIC_KAKAO_ADFIT_HOME_WIDTH`,
+`PUBLIC_KAKAO_ADFIT_HOME_HEIGHT`, `PUBLIC_KAKAO_ADFIT_ARTICLE_WIDTH`,
+`PUBLIC_KAKAO_ADFIT_ARTICLE_HEIGHT`를 함께 지정합니다.
+
 ## 배포
 
 `main` 브랜치에 반영되면 GitHub Actions가 정적 사이트를 빌드해 GitHub

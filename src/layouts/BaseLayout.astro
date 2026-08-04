@@ -2,6 +2,11 @@
 import SeoHead from "../components/SeoHead.astro";
 import SiteFooter from "../components/SiteFooter.astro";
 import SiteHeader from "../components/SiteHeader.astro";
+import {
+  getAdConfig,
+  shouldLoadGoogleAdsense,
+  type AdPlacement,
+} from "../lib/ads";
 import { BASE_PATH } from "../lib/site";
 import "../styles/global.css";
 
@@ -11,12 +16,28 @@ interface Props {
   image?: string;
   imageAlt?: string;
   article?: boolean;
+  adPlacement?: AdPlacement;
 }
 
-const { title, description, image, imageAlt, article = false } = Astro.props;
+const {
+  title,
+  description,
+  image,
+  imageAlt,
+  article = false,
+  adPlacement,
+} = Astro.props;
 const path = Astro.url.pathname.startsWith(BASE_PATH)
   ? Astro.url.pathname.slice(BASE_PATH.length) || "/"
   : Astro.url.pathname;
+const adConfig = adPlacement ? getAdConfig(import.meta.env, adPlacement) : null;
+const shouldLoadGoogleAds = shouldLoadGoogleAdsense(adConfig);
+const googleAdsenseScript =
+  adConfig?.provider === "google"
+    ? `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${encodeURIComponent(
+        adConfig.client,
+      )}`
+    : undefined;
 ---
 
 <!doctype html>
@@ -33,6 +54,16 @@ const path = Astro.url.pathname.startsWith(BASE_PATH)
       imageAlt={imageAlt}
       article={article}
     />
+    {
+      shouldLoadGoogleAds && googleAdsenseScript && (
+        <script
+          is:inline
+          async
+          src={googleAdsenseScript}
+          crossorigin="anonymous"
+        ></script>
+      )
+    }
     <script is:inline>
       const savedTheme = localStorage.getItem("theme");
       const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;

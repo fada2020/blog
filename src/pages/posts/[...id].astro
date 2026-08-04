@@ -1,6 +1,7 @@
 ---
 import { getImage, Image } from "astro:assets";
 import { render } from "astro:content";
+import AdSlot from "../../components/AdSlot.astro";
 import PostMeta from "../../components/PostMeta.astro";
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import { getPublishedPosts } from "../../lib/posts";
@@ -29,6 +30,7 @@ const socialImage = await getImage({
   image={socialImage.src}
   imageAlt={post.data.heroImageAlt}
   article
+  adPlacement="article"
 >
   <article class="article">
     <header class="article-header">
@@ -64,6 +66,8 @@ const socialImage = await getImage({
     <div class="article-body">
       <Content />
     </div>
+
+    <AdSlot placement="article" />
   </article>
 </BaseLayout>
 
