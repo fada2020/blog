@@ -2,11 +2,7 @@
 import SeoHead from "../components/SeoHead.astro";
 import SiteFooter from "../components/SiteFooter.astro";
 import SiteHeader from "../components/SiteHeader.astro";
-import {
-  getAdConfig,
-  shouldLoadGoogleAdsense,
-  type AdPlacement,
-} from "../lib/ads";
+import { getGoogleAdsenseClient, type AdPlacement } from "../lib/ads";
 import { BASE_PATH } from "../lib/site";
 import "../styles/global.css";
 
@@ -25,17 +21,15 @@ const {
   image,
   imageAlt,
   article = false,
-  adPlacement,
 } = Astro.props;
 const path = Astro.url.pathname.startsWith(BASE_PATH)
   ? Astro.url.pathname.slice(BASE_PATH.length) || "/"
   : Astro.url.pathname;
-const adConfig = adPlacement ? getAdConfig(import.meta.env, adPlacement) : null;
-const shouldLoadGoogleAds = shouldLoadGoogleAdsense(adConfig);
+const googleAdsenseClient = getGoogleAdsenseClient(import.meta.env);
 const googleAdsenseScript =
-  adConfig?.provider === "google"
+  googleAdsenseClient
     ? `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${encodeURIComponent(
-        adConfig.client,
+        googleAdsenseClient,
       )}`
     : undefined;
 ---
@@ -55,7 +49,7 @@ const googleAdsenseScript =
       article={article}
     />
     {
-      shouldLoadGoogleAds && googleAdsenseScript && (
+      googleAdsenseScript && (
         <script
           is:inline
           async

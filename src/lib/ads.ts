@@ -16,6 +16,7 @@ export type AdConfig =
 
 export type AdEnvironment = Record<string, string | undefined>;
 
+const DEFAULT_GOOGLE_ADSENSE_CLIENT = "ca-pub-3268409402826303";
 const DEFAULT_KAKAO_UNIT = "DAN-DEyO01RLXs86EFR1";
 const DEFAULT_KAKAO_WIDTH = 728;
 const DEFAULT_KAKAO_HEIGHT = 90;
@@ -27,7 +28,7 @@ export function getAdConfig(
   const provider = getPlacementProvider(env, placement);
 
   if (provider === "google") {
-    const client = env.PUBLIC_GOOGLE_ADSENSE_CLIENT;
+    const client = getGoogleAdsenseClient(env);
     const slot =
       placement === "home"
         ? env.PUBLIC_GOOGLE_ADSENSE_HOME_SLOT
@@ -69,8 +70,12 @@ export function getAdConfig(
   return null;
 }
 
-export function shouldLoadGoogleAdsense(config: AdConfig | null): boolean {
-  return config?.provider === "google";
+export function getGoogleAdsenseClient(env: AdEnvironment): string | null {
+  const client = env.PUBLIC_GOOGLE_ADSENSE_CLIENT;
+
+  if (client === "off") return null;
+
+  return client || DEFAULT_GOOGLE_ADSENSE_CLIENT;
 }
 
 function getPlacementProvider(
