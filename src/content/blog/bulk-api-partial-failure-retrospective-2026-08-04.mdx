@@ -1,0 +1,262 @@
+---
+title: "벌크 API 회고: 한 항목의 실패가 전체 요청을 망치지 않게 하기"
+description: "업무일지를 익명화해 벌크 API에서 항목별 실패를 격리하고, 생애주기 연결과 회귀 테스트를 정리한 실무 회고입니다."
+publishedAt: 2026-08-04T14:30:00+09:00
+draft: false
+category: "Backend"
+tags: ["Spring Boot", "API Design", "Bulk API", "Regression Test"]
+kind: "worklog"
+heroImage: "../../assets/blog/bulk-api-partial-failure-retrospective-2026-08-04/cover.webp"
+heroImageAlt: "벌크 API 요청에서 성공 항목과 실패 항목을 분리해 처리하는 백엔드 회고 다이어그램"
+imageCredit:
+  label: "AI 생성 이미지"
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **작성 기준**
+>
+> 2026년 8월 3일부터 8월 4일까지의 업무일지를 공개 가능한 수준으로 익명화했습니다.
+> 회사명, 서비스명, 내부 URL, 계정, 실제 식별자, 도메인 특수 정보는 제거했고, 구체 업무는
+> "장치", "사용 회차", "측정값", "이벤트" 같은 일반 용어로 바꿨습니다.
+> 기술 메모는 2026년 8월 4일 기준 Spring Framework 공식 문서의 트랜잭션 동작을 함께 확인했습니다.
+
+## 결론부터 말하면
+
+벌크 API는 "큰 요청 하나"가 아니라 **작은 명령 여러 개가 같은 봉투에 담겨 온 것**으로 보는 편이
+안전했습니다. 클라이언트가 각 항목을 이미 구분해서 보내고 있다면, 한 항목의 입력 오류 때문에
+정상 항목까지 전부 롤백하는 설계가 항상 사용자에게 친절한 것은 아닙니다.
+
+이번 회고의 핵심은 세 가지였습니다.
+
+- 일반 저장 경로와 벌크 저장 경로가 같은 생애주기 연결 규칙을 써야 합니다.
+- 입력 오류는 서버 오류처럼 터뜨리지 말고 항목별 실패로 내려야 합니다.
+- 성공 항목과 실패 항목의 경계는 응답 계약에 명시되어야 합니다.
+
+Spring Boot로 비유하면 `POST /events` 한 건 저장과 `POST /events/bulk` 저장이 서로 다른
+도메인 규칙을 타면 안 됩니다. 컨트롤러는 달라도 서비스 계층에서 소유권, 시각, 상태 전이,
+연결 대상 결정 규칙은 같아야 합니다.
+
+## 문제가 된 모양
+
+증상은 단순했습니다. 일반 저장에서는 정상적으로 연결되던 "사용 회차"가 벌크 저장에서는 누락되거나
+다르게 연결될 수 있었습니다. 또 벌크 요청 안에 잘못된 명시 ID가 하나 들어오면, 그 항목만 실패하는
+대신 전체 요청이 예외로 끝날 위험이 있었습니다.
+
+업무 도메인을 걷어내면 구조는 아래와 같습니다.
+
+| 구분 | 일반 저장 | 벌크 저장에서 드러난 위험 |
+|---|---|---|
+| 연결 기준 | 소유자와 발생 시각으로 사용 회차를 찾음 | 별도 경로에서 연결 규칙이 빠질 수 있음 |
+| 명시 ID | 소유권과 상태를 검증한 뒤 연결 | 잘못된 ID가 전체 배치를 중단할 수 있음 |
+| 실패 응답 | 단일 요청이므로 4xx로 충분 | 어떤 항목이 실패했는지 식별자가 필요함 |
+| 회귀 테스트 | 한 건 저장 중심 | 성공/실패가 섞인 벌크 케이스가 필요함 |
+
+이런 문제는 "벌크라서 복잡하다"보다 "동일한 도메인 규칙이 두 경로에 흩어졌다"에 가깝습니다.
+처음에는 한 건 저장이 먼저 생기고, 나중에 모바일 동기화나 대량 업로드를 위해 벌크가 붙습니다.
+그때 기존 서비스를 그대로 재사용하지 못하면 비슷한 검증 로직이 조금씩 갈라집니다.
+
+<Mermaid title="벌크 요청에서 성공과 실패를 분리하는 흐름">
+{`flowchart TD
+  Request["벌크 요청"] --> Split["항목 단위로 분리"]
+  Split --> Resolve["소유권과 시각 기준으로 사용 회차 결정"]
+  Resolve -->|정상| Save["성공 항목 저장"]
+  Resolve -->|입력 오류| Fail["temporaryId별 422 실패 목록"]
+  Save --> Response["성공 목록 + 실패 목록 응답"]
+  Fail --> Response
+`}
+</Mermaid>
+
+## 응답 계약을 먼저 정해야 합니다
+
+벌크 API에서 가장 먼저 정할 것은 저장 방식이 아니라 실패 표현입니다. 요청 안의 항목을 다시
+찾을 수 없다면 클라이언트는 재시도도, 사용자 표시도, 로컬 상태 정리도 제대로 할 수 없습니다.
+
+그래서 항목마다 `temporaryId` 같은 클라이언트 측 식별자가 필요합니다.
+
+```json
+{
+  "saved": [
+    {
+      "temporaryId": "row-1",
+      "id": 101
+    }
+  ],
+  "failed": [
+    {
+      "temporaryId": "row-2",
+      "status": 422,
+      "code": "INVALID_USAGE_REF"
+    }
+  ]
+}
+```
+
+여기서 중요한 것은 내부 예외 메시지를 그대로 내리지 않는 것입니다. "몇 번 FK가 없다" 같은 메시지는
+서버 내부 구조를 드러냅니다. 클라이언트에는 항목 식별자, 분류 가능한 코드, 사용자에게 보여 줄 수
+있는 일반 메시지만 주는 편이 낫습니다.
+
+HTTP 상태는 팀마다 선택지가 있습니다. 전체 요청 형식이 깨졌다면 `400`이나 `422`가 맞습니다.
+하지만 요청 봉투는 유효하고 일부 항목만 실패했다면 `200`에 `failed` 목록을 주거나, 팀 표준이
+있다면 `207 Multi-Status`를 쓸 수 있습니다. 중요한 것은 숫자 하나가 아니라 "부분 성공이 가능한
+API"라는 계약을 문서와 테스트에 남기는 것입니다.
+
+## 트랜잭션 경계는 의도적으로 잡아야 합니다
+
+Spring의 선언적 트랜잭션은 기본적으로 런타임 예외와 `Error`에서 롤백합니다. 또 `PROPAGATION_REQUIRED`
+안쪽에서 롤백 전용 표시가 잡히면 바깥 트랜잭션도 커밋됐다고 믿을 수 없기 때문에
+`UnexpectedRollbackException`으로 이어질 수 있습니다. 이 동작은 Spring Framework 공식 문서에서
+확인할 수 있는 기본 계약입니다.
+
+벌크 처리에서 흔한 실수는 아래 코드처럼 메서드 전체를 하나의 `@Transactional`로 묶고, 내부에서
+예외를 잡았으니 괜찮다고 생각하는 것입니다.
+
+```java
+@Transactional
+public BulkResponse saveAll(List<BulkCommand> commands) {
+    List<SavedItem> saved = new ArrayList<>();
+    List<BulkFailure> failed = new ArrayList<>();
+
+    for (BulkCommand command : commands) {
+        try {
+            saved.add(saveOne(command));
+        } catch (InvalidLifecycleInputException ex) {
+            failed.add(BulkFailure.invalidRequest(command.temporaryId()));
+        }
+    }
+
+    return BulkResponse.of(saved, failed);
+}
+```
+
+이 코드는 보기에는 항목별 실패를 처리하는 것처럼 보입니다. 하지만 `saveOne()` 내부에서 이미
+트랜잭션이 롤백 전용 상태가 됐거나, JPA flush 시점에 예외가 뒤늦게 터지는 구조라면 의도와 다르게
+전체 커밋이 실패할 수 있습니다.
+
+실무에서는 보통 세 가지 중 하나를 고릅니다.
+
+| 방식 | 맞는 상황 | 주의점 |
+|---|---|---|
+| 저장 전 검증 | 입력 오류를 DB 쓰기 전에 대부분 판별할 수 있음 | 검증 로직과 저장 로직이 갈라지지 않게 해야 함 |
+| 항목별 트랜잭션 | 항목 간 독립성이 높고 부분 성공이 자연스러움 | 커넥션 풀과 처리량을 같이 봐야 함 |
+| 전체 원자성 | 하나라도 실패하면 모두 실패해야 하는 업무 규칙 | 부분 성공 응답을 제공하면 안 됨 |
+
+이번 회고의 경우에는 항목 간 독립성이 높았습니다. 그래서 "한 항목 실패가 전체 실패"보다
+"항목별 검증 결과를 응답에 남기고 정상 항목은 저장"이 사용자 경험과 운영 관측성 모두에 더 맞았습니다.
+
+## 서비스 계층은 한 경로로 모읍니다
+
+컨트롤러가 하나든 여러 개든 사용 회차를 찾는 규칙은 한 곳에 있어야 합니다. 다음처럼 벌크 서비스가
+일반 저장 서비스를 우회하면 시간이 지나면서 거의 반드시 갈라집니다.
+
+```java
+// 피해야 할 방향: 벌크 경로만 별도 규칙으로 연결 대상을 결정한다.
+LifecycleRef ref = bulkOnlyResolver.find(command.explicitUsageId());
+```
+
+대신 일반 저장과 벌크 저장이 같은 resolver를 쓰게 만드는 편이 단순합니다.
+
+```java
+for (BulkCommand command : commands) {
+    try {
+        LifecycleRef ref = lifecycleResolver.resolve(
+            command.ownerId(),
+            command.eventTime(),
+            command.explicitUsageId()
+        );
+
+        saved.add(deliveryService.save(command, ref));
+    } catch (InvalidLifecycleInputException ex) {
+        failed.add(BulkFailure.invalidRequest(command.temporaryId()));
+    }
+}
+```
+
+여기서 `lifecycleResolver`는 단순 조회기가 아닙니다. 소유권, 발생 시각, 명시 ID, 상태 전이를
+한 번에 판단하는 도메인 서비스입니다. Spring Boot 프로젝트라면 `@Service` 하나로 시작해도 충분합니다.
+중요한 것은 벌크 전용 지름길을 만들지 않는 것입니다.
+
+## 회귀 테스트는 성공 케이스보다 실패 경계를 잡아야 합니다
+
+이번 류의 버그는 "정상 데이터 10개를 넣으면 10개가 저장된다"는 테스트만으로는 잘 잡히지 않습니다.
+성공과 실패가 섞였을 때 시스템이 어디까지 저장하고 어디서 멈추는지 봐야 합니다.
+
+| 테스트 | 기대값 |
+|---|---|
+| 일반 저장과 벌크 저장이 같은 조건에서 같은 사용 회차에 연결된다 | 두 경로의 연결 대상이 같다 |
+| 벌크 요청 중 하나의 명시 ID가 잘못됐다 | 해당 `temporaryId`만 실패 목록에 들어간다 |
+| 잘못된 소유자의 명시 ID가 들어왔다 | 서버 오류가 아니라 입력 오류로 분류된다 |
+| 성공 항목과 실패 항목이 섞여 있다 | 성공 항목은 저장되고 실패 항목은 저장되지 않는다 |
+| 동일 `temporaryId` 재시도가 들어왔다 | 멱등 처리 규칙이 유지된다 |
+| 실패 항목이 있다 | 후속 이벤트나 알림은 성공 항목 기준으로만 나간다 |
+
+JUnit으로는 컨트롤러 테스트보다 서비스 통합 테스트를 먼저 두는 편이 효과적입니다. 이 문제의 핵심은
+HTTP 매핑이 아니라 저장 규칙과 트랜잭션 경계이기 때문입니다.
+
+```java
+@Test
+void bulkSaveKeepsValidItemsWhenOneItemHasInvalidUsageRef() {
+    BulkCommand valid = command("row-1", validUsageRef());
+    BulkCommand invalid = command("row-2", unknownUsageRef());
+
+    BulkResponse response = service.saveAll(List.of(valid, invalid));
+
+    assertThat(response.saved())
+        .extracting(SavedItem::temporaryId)
+        .containsExactly("row-1");
+    assertThat(response.failed())
+        .extracting(BulkFailure::temporaryId)
+        .containsExactly("row-2");
+    assertThat(repository.existsByTemporaryId("row-1")).isTrue();
+    assertThat(repository.existsByTemporaryId("row-2")).isFalse();
+}
+```
+
+테스트 이름은 길어져도 괜찮습니다. 이 테스트가 지키는 계약은 "잘못된 항목 하나가 정상 항목을
+망치지 않는다"입니다. 이 정도는 이름에 드러나는 편이 유지보수에 유리합니다.
+
+## 관측성에서는 4xx와 5xx를 분리합니다
+
+입력 오류가 항목별 실패로 정리됐다면 운영 알림도 같은 기준을 따라야 합니다. 잘못된 명시 ID,
+소유권 불일치, 시간 범위 밖 데이터는 사용자가 고칠 수 있는 4xx 계열 문제입니다. 이런 오류를
+서버 예외로 로깅하거나 Sentry 같은 오류 추적 도구에 5xx처럼 올리면 진짜 장애 신호가 흐려집니다.
+
+반대로 resolver 자체가 예기치 못한 상태를 만났거나, DB 제약이 코드의 사전 검증을 뚫고 터졌다면
+그때는 서버 오류로 봐야 합니다. 같은 실패라도 분류가 다르면 대응이 달라집니다.
+
+| 분류 | 예시 | 처리 |
+|---|---|---|
+| 입력 오류 | 존재하지 않는 명시 ID, 소유권 불일치 | 항목별 실패 응답, 서버 오류 알림 제외 |
+| 업무 충돌 | 이미 종료된 사용 회차에 쓰기 시도 | 명확한 실패 코드, 재시도 여부 안내 |
+| 서버 오류 | resolver 버그, 예상 못 한 DB 제약 위반 | 5xx, 오류 추적, 배포 회귀 확인 |
+
+Spring Boot에서는 예외 타입부터 나누는 것이 출발점입니다. `InvalidLifecycleInputException`과
+`UnexpectedLifecycleStateException`을 같은 `RuntimeException`으로만 두면 컨트롤러 어드바이스,
+로그 레벨, 알림 라우팅이 모두 흐릿해집니다.
+
+## 작은 실습: 벌크 저장을 설계할 때 묻는 질문
+
+아래 질문에 바로 답하지 못하면 구현보다 계약 정리가 먼저입니다.
+
+- 한 항목이 실패했을 때 나머지 항목은 저장되어도 되는가?
+- 클라이언트가 실패 항목을 다시 찾을 수 있는 식별자를 보내는가?
+- 일반 저장과 벌크 저장이 같은 도메인 resolver를 쓰는가?
+- 입력 오류와 서버 오류가 예외 타입, 응답 코드, 로그 레벨에서 분리되는가?
+- 재시도하면 중복 저장되는가, 아니면 멱등하게 처리되는가?
+- 성공 항목에만 후속 이벤트가 발행되는가?
+
+이 질문들은 프레임워크보다 API 계약에 가깝습니다. Spring Boot, Kotlin, Node.js 어느 쪽으로
+구현해도 답은 필요합니다.
+
+## 참고자료
+
+- [Spring Framework Reference, "Rolling Back a Declarative Transaction"](https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/rolling-back.html) -
+  2026년 8월 4일 확인, Stable 7.0.8 / 6.2.19 문서 기준
+- [Spring Framework Reference, "Transaction Propagation"](https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/tx-propagation.html) -
+  2026년 8월 4일 확인, `PROPAGATION_REQUIRED`, `REQUIRES_NEW`, `NESTED` 동작 기준
+
+## 오늘의 결론
+
+신뢰할 수 있는 백엔드는 "전부 성공하거나 전부 실패한다"만 뜻하지 않습니다. 더 중요한 것은 성공과
+실패의 경계를 API 계약으로 분명히 정하고, 그 경계를 테스트와 트랜잭션 설계가 실제로 지키게 만드는
+것입니다.

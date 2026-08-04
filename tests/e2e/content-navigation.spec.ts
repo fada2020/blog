@@ -37,8 +37,11 @@ test("홈은 관심 분야 링크 계약과 현재 학습 단계 표식을 유�
   const frontendLink = page
     .getByRole("region", { name: "관심 분야" })
     .getByRole("link", { name: "Frontend", exact: true });
+  const backendLink = page
+    .getByRole("region", { name: "관심 분야" })
+    .getByRole("link", { name: "Backend", exact: true });
   await expect(frontendLink).toHaveAttribute("href", "/blog/categories/Frontend/");
-  await expect(page.getByRole("link", { name: "Backend", exact: true })).toHaveCount(0);
+  await expect(backendLink).toHaveAttribute("href", "/blog/categories/Backend/");
 
   const roadmap = page.getByRole("list", { name: "학습 순서" });
   const currentStep = roadmap.getByRole("listitem").filter({ hasText: "Next.js" });
@@ -59,12 +62,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: "2026년 8월 첫째 주 IT 기술동향",
+      name: "벌크 API 회고",
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: "Next.js 16.3.0 안정 릴리스",
+      name: "2026년 8월 첫째 주 IT 기술동향",
     }),
   ).toBeVisible();
 });
