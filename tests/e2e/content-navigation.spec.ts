@@ -59,12 +59,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: "Next.js 16.3.0 안정 릴리스",
+      name: "2026년 8월 첫째 주 IT 기술동향",
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: "Spring Boot 개발자를 위한 Next.js 라우팅",
+      name: "Next.js 16.3.0 안정 릴리스",
     }),
   ).toBeVisible();
 });
