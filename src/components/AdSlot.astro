@@ -1,0 +1,74 @@
+---
+import { getAdConfig, type AdPlacement } from "../lib/ads";
+
+interface Props {
+  placement: AdPlacement;
+}
+
+const { placement } = Astro.props;
+const config = getAdConfig(import.meta.env, placement);
+---
+
+{
+  config && (
+    <aside class="ad-slot" aria-label="광고" data-ad-provider={config.provider}>
+      <span class="ad-label">광고</span>
+      {
+        config.provider === "google" ? (
+          <>
+            <ins
+              class="adsbygoogle"
+              style="display:block"
+              data-ad-client={config.client}
+              data-ad-slot={config.slot}
+              data-ad-format="auto"
+              data-full-width-responsive="true"
+            ></ins>
+            <script is:inline>
+              (window.adsbygoogle = window.adsbygoogle || []).push({});
+            </script>
+          </>
+        ) : (
+          <>
+            <ins
+              class="kakao_ad_area"
+              style="display:none;"
+              data-ad-unit={config.unit}
+              data-ad-width={config.width}
+              data-ad-height={config.height}
+            ></ins>
+            <script
+              is:inline
+              async
+              src="https://t1.kakaocdn.net/kas/static/ba.min.js"
+            ></script>
+          </>
+        )
+      }
+    </aside>
+  )
+}
+
+<style>
+  .ad-slot {
+    width: min(100%, var(--reading-width));
+    min-height: 132px;
+    margin: 48px auto 0;
+    padding: 20px 0;
+    border-top: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--color-border);
+    text-align: center;
+  }
+
+  .ad-label {
+    display: block;
+    margin-bottom: 12px;
+    color: var(--color-muted);
+    font-size: 12px;
+  }
+
+  .ad-slot :global(ins) {
+    max-width: 100%;
+    margin-inline: auto;
+  }
+</style>

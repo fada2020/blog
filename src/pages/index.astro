@@ -1,5 +1,6 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
+import AdSlot from "../components/AdSlot.astro";
 import FeaturedPost from "../components/FeaturedPost.astro";
 import PostList from "../components/PostList.astro";
 import { getPublishedPosts } from "../lib/posts";
@@ -58,6 +59,7 @@ const editorialRhythm = [
 <BaseLayout
   title="Field Notes"
   description="현장에서 배운 기술을 차분하게 기록하는 기술 블로그입니다."
+  adPlacement="home"
 >
   {
     featuredPost ? (
@@ -148,6 +150,8 @@ const editorialRhythm = [
     </div>
     <p class="editorial-note">공휴일을 제외한 영업일 기준으로 주간 발행 흐름을 유지합니다.</p>
   </section>
+
+  <AdSlot placement="home" />
 </BaseLayout>
 
 <style>
