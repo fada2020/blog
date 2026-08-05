@@ -1,0 +1,248 @@
+---
+title: "장애 알림 회고: 의존성을 모르면 같은 장애를 여러 번 보낸다"
+description: "장애 알림에서 의존성 차단, 지속 시간, 복구 알림, 재시작 후 중복 방지를 함께 설계한 실무 회고입니다."
+publishedAt: 2026-08-05T09:00:00+09:00
+draft: false
+category: "Observability"
+tags: ["Observability", "Alerting", "Slack", "Incident Response"]
+kind: "worklog"
+heroImage: "../../assets/blog/alert-dependency-dedup-retrospective-2026-08-05/cover.webp"
+heroImageAlt: "서로 의존하는 시스템 점검 결과가 하나의 장애 알림으로 묶이는 관측성 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+## 결론부터 말하면
+
+장애 알림은 "무엇이 죽었는가"보다 **무엇을 아직 판단하면 안 되는가**를 먼저 정해야 했습니다.
+데이터베이스가 내려갔는데 워커도 실패했다고 따로 알리고, 터널이 끊겼는데 뒤쪽 데이터베이스까지
+실패로 알리면 운영자는 같은 원인을 여러 장애로 받아들입니다.
+
+이번 회고의 핵심은 네 가지였습니다.
+
+- 상위 의존성이 실패하면 하위 점검은 `unknown`으로 보류합니다.
+- 짧은 흔들림은 바로 보내지 않고, 일정 시간 지속된 장애만 알립니다.
+- 장애 알림과 복구 알림은 각각 한 번만 보냅니다.
+- 프로세스가 재시작되어도 이미 보낸 상태를 잃지 않습니다.
+
+Spring Boot 개발자에게 익숙한 비유로 말하면, `HealthIndicator`를 여러 개 붙이는 것만으로는 부족합니다.
+상태를 계산하는 순서, 의존성, 알림 전이, 재시작 후 상태 복원까지 정해야 운영 알림이 실제로 쓸 수
+있는 신호가 됩니다.
+
+> 검증일: 2026-08-05. Node.js는 공식 릴리스 기준 LTS `24.19.0`, Current `26.6.0`을 확인했습니다.
+> 타이머 예시는 안정 상태의 Node.js Timers API를 기준으로 작성했습니다. Slack Incoming Webhooks와
+> Prometheus Alertmanager의 grouping/inhibition 공식 문서도 함께 확인했습니다.
+
+## 문제가 된 모양
+
+처음에는 감시 대상마다 독립적으로 상태를 확인하면 충분해 보였습니다. 예를 들어 아래 네 가지를
+30초마다 확인하는 식입니다.
+
+| 감시 대상 | 확인하고 싶었던 것 | 숨어 있던 의존성 |
+|---|---|---|
+| 모니터링 DB | 알림 상태 저장소가 살아 있는가 | 워커 상태 판단의 전제 |
+| 워커 | 주기 작업이 계속 도는가 | 모니터링 DB가 살아 있어야 판단 가능 |
+| 네트워크 터널 | 외부 데이터베이스까지 경로가 열렸는가 | 뒤쪽 DB 상태 판단의 전제 |
+| 외부 DB | 실제 업무 데이터에 접근 가능한가 | 터널이 살아 있어야 판단 가능 |
+
+문제는 실제 장애가 독립적으로 오지 않는다는 점이었습니다. 모니터링 DB가 내려가면 워커도 상태를
+정상적으로 기록하지 못합니다. 네트워크 터널이 끊기면 뒤쪽 DB 접속 실패도 같이 발생합니다. 이때
+각 점검을 모두 `down`으로 보내면 Slack에는 원인 하나가 여러 장애처럼 쌓입니다.
+
+<Mermaid title="의존성 있는 장애 점검 흐름">
+{`flowchart TD
+  Tick["30초 주기 점검"] --> PrimaryDb["모니터링 DB"]
+  PrimaryDb -->|up| Worker["워커"]
+  PrimaryDb -->|down| WorkerUnknown["워커 판단 보류"]
+  Tick --> Tunnel["네트워크 터널"]
+  Tunnel -->|up| ExternalDb["외부 DB"]
+  Tunnel -->|down| ExternalDbUnknown["외부 DB 판단 보류"]
+  Worker --> State["상태 전이 계산"]
+  ExternalDb --> State
+  WorkerUnknown --> State
+  ExternalDbUnknown --> State
+  State --> Notify["장애/복구 알림"]
+`}
+</Mermaid>
+
+## `down`과 `unknown`을 분리합니다
+
+장애 점검에서 가장 먼저 고친 것은 상태 값이었습니다. `up/down`만 있으면 판단 불가 상태를 표현할
+곳이 없습니다. 그래서 점검 결과를 아래처럼 나누는 편이 안전했습니다.
+
+| 상태 | 의미 | 알림 처리 |
+|---|---|---|
+| `up` | 직접 확인했고 정상입니다 | 기존 장애가 있으면 복구 후보 |
+| `down` | 직접 확인했고 실패했습니다 | 지속 시간 조건을 만족하면 장애 후보 |
+| `unknown` | 상위 의존성 실패로 판단할 수 없습니다 | 별도 장애로 보내지 않음 |
+
+이 차이는 작아 보이지만 알림 품질에는 큽니다. `unknown`은 "괜찮다"가 아닙니다. 다만 이미 더 앞단의
+장애가 관측됐으므로 하위 시스템을 별도 원인처럼 말하지 않겠다는 뜻입니다.
+
+Prometheus Alertmanager도 비슷한 문제를 grouping과 inhibition으로 다룹니다. grouping은 비슷한
+알림을 하나로 묶고, inhibition은 특정 알림이 활성화됐을 때 그와 관련된 다른 알림을 묵음 처리합니다.
+작은 감시기도 같은 원리를 단순하게 적용할 수 있습니다.
+
+## 전이는 상태 파일에 남깁니다
+
+두 번째 문제는 중복 알림이었습니다. 프로세스 메모리에만 "이미 보냈다"를 들고 있으면 재시작할 때
+같은 장애를 다시 보낼 수 있습니다. 그래서 알림 상태는 작은 JSON 파일에 남겼습니다.
+
+```json
+{
+  "monitoringDb": {
+    "status": "down",
+    "firstSeenAt": "2026-08-05T00:00:00.000Z",
+    "notifiedDown": true,
+    "notifiedUp": false
+  }
+}
+```
+
+여기서 중요한 값은 현재 상태 하나가 아니라 전이 이력입니다. 언제 처음 실패했는지, 장애 알림을 이미
+보냈는지, 복구 알림을 보냈는지를 알아야 다음 점검에서 같은 메시지를 다시 보내지 않습니다.
+
+간단한 TypeScript 형태로 줄이면 아래와 같습니다.
+
+```ts
+type HealthStatus = "up" | "down" | "unknown";
+
+type AlertState = {
+  status: HealthStatus;
+  firstSeenAt?: string;
+  notifiedDown: boolean;
+  notifiedUp: boolean;
+};
+
+function nextAlert(
+  previous: AlertState | undefined,
+  current: HealthStatus,
+  now: Date,
+  sustainedMs: number,
+) {
+  if (current === "unknown") {
+    return { state: previous, message: undefined };
+  }
+
+  if (!previous || previous.status !== current) {
+    return {
+      state: {
+        status: current,
+        firstSeenAt: now.toISOString(),
+        notifiedDown: false,
+        notifiedUp: false,
+      },
+      message: undefined,
+    };
+  }
+
+  const firstSeenAt = new Date(previous.firstSeenAt ?? now).getTime();
+  const sustained = now.getTime() - firstSeenAt >= sustainedMs;
+
+  if (current === "down" && sustained && !previous.notifiedDown) {
+    return {
+      state: { ...previous, notifiedDown: true },
+      message: "down" as const,
+    };
+  }
+
+  if (current === "up" && previous.notifiedDown && !previous.notifiedUp) {
+    return {
+      state: { ...previous, notifiedUp: true },
+      message: "up" as const,
+    };
+  }
+
+  return { state: previous, message: undefined };
+}
+```
+
+실제 구현에서는 파일 쓰기 원자성, 동시 실행 방지, 시간대 표시를 더 챙겨야 합니다. 하지만 핵심은
+복잡한 프레임워크가 아니라 전이를 명시적으로 저장하는 것입니다.
+
+## 지속 시간은 운영자를 보호하는 장치입니다
+
+30초 점검에서 한 번 실패했다고 바로 알리면 네트워크 순간 흔들림도 장애가 됩니다. 그래서 장애 알림은
+5분 지속 조건을 둔 뒤 한 번만 보냈습니다. 반대로 복구 알림은 장애 알림이 이미 나간 대상에 대해서만
+보내도록 했습니다.
+
+| 상황 | 보내는 메시지 |
+|---|---|
+| 첫 실패 | 보내지 않음, `firstSeenAt`만 기록 |
+| 5분 미만 실패 지속 | 보내지 않음 |
+| 5분 이상 실패 지속 | 장애 알림 1회 |
+| 실패가 계속됨 | 추가 전송 없음 |
+| 정상 복구 | 복구 알림 1회 |
+| 복구 후 계속 정상 | 추가 전송 없음 |
+
+이 기준을 정하면 테스트도 분명해집니다. "장애가 난다"가 아니라 "첫 실패 후 4분 59초에는 보내지 않고,
+5분 0초에는 한 번만 보낸다"가 됩니다.
+
+## Slack 메시지는 짧아야 합니다
+
+Slack Incoming Webhooks는 JSON payload를 HTTP POST로 보내는 단순한 인터페이스입니다. 공식 문서에서도
+성공 시 흔히 HTTP 200과 `ok` 응답을 받지만, 잘못된 payload나 비활성 webhook 같은 실패를 준비하라고
+설명합니다.
+
+운영 알림 본문에는 원인을 모두 쓰기보다 판단에 필요한 최소 정보만 넣는 편이 나았습니다.
+
+```json
+{
+  "text": "장애 알림: 외부 DB 경로 점검 실패",
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*장애 알림*\\n대상: 외부 DB 경로\\n지속: 5분 이상\\n시각: 2026년 8월 5일 09:30:00"
+      }
+    }
+  ]
+}
+```
+
+본문에는 민감한 링크, 계정, 토큰, 원본 로그를 넣지 않습니다. 자세한 분석은 이슈나 런북처럼 접근
+통제가 되는 곳에 남기고, 채팅 알림은 "무엇을 봐야 하는가"만 알려주는 신호로 남겨야 합니다.
+
+## 검증은 실제 장애를 흉내 내야 합니다
+
+이런 기능은 단위 테스트만으로 끝내기 어렵습니다. 상태 전이 함수는 단위 테스트로 잡고, 실제 알림은
+의도적으로 감시 대상을 끊어 보며 확인해야 합니다.
+
+| 검증 | 기대값 |
+|---|---|
+| 하위 대상만 실패 | 해당 대상 장애 알림이 1회 전송 |
+| 상위 대상 실패 | 하위 대상은 `unknown`, 별도 알림 없음 |
+| 장애가 5분 미만 지속 | 알림 없음 |
+| 장애가 5분 이상 지속 | 장애 알림 1회 |
+| 프로세스 재시작 후 장애 지속 | 중복 장애 알림 없음 |
+| 장애 복구 | 복구 알림 1회 |
+| webhook 응답 실패 | 알림 상태를 성공으로 확정하지 않음 |
+
+특히 마지막 항목이 중요했습니다. Slack 전송이 실패했는데 내부 상태를 "알림 완료"로 바꾸면 실제
+운영자는 아무 메시지도 받지 못합니다. 외부 전송의 HTTP 상태와 응답 본문까지 확인한 뒤 전이를
+확정해야 합니다.
+
+## 작은 실습: 의존성 그래프부터 그려 봅니다
+
+장애 알림을 추가하기 전에 아래 질문에 답해 보면 구현 범위가 훨씬 선명해집니다.
+
+- 이 점검은 다른 점검의 전제인가, 결과인가?
+- 상위 점검이 실패했을 때 이 점검은 `down`인가 `unknown`인가?
+- 몇 초 또는 몇 분 동안 지속되어야 운영자에게 보낼 것인가?
+- 장애 알림과 복구 알림은 각각 어떤 전이에서 한 번만 나가는가?
+- 프로세스가 재시작되어도 전이 상태를 복원할 수 있는가?
+- 외부 알림 전송이 실패했을 때 상태를 어떻게 유지할 것인가?
+
+처음부터 완전한 관측성 플랫폼을 만들 필요는 없습니다. 작은 감시기라도 의존성, 지속 시간, 전이 저장,
+전송 성공 확인을 갖추면 알림은 훨씬 덜 시끄러워집니다.
+
+## 참고자료
+
+- [Slack Developer Docs: Sending messages using incoming webhooks](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/)
+- [Prometheus Alertmanager 공식 문서](https://prometheus.io/docs/alerting/latest/alertmanager/)
+- [Prometheus Alertmanager configuration: inhibition](https://prometheus.io/docs/alerting/latest/configuration/)
+- [Node.js 24.19.0 LTS 릴리스 노트](https://nodejs.org/en/blog/release/v24.19.0)
+- [Node.js Timers API 공식 문서](https://nodejs.org/api/timers.html)
