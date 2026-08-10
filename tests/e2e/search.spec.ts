@@ -5,15 +5,15 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(9);
+  expect(entries).toHaveLength(10);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "Next.js App Router 심화: 서버와 클라이언트 경계를 먼저 그어야 합니다",
+    "Spring Boot 개발자를 위한 Next.js 데이터 조회: Server Component와 캐시 경계 잡기",
   );
   expect(entries[0].href).toBe(
-    "/blog/posts/app-router-boundary-deep-dive-2026-08-07/",
+    "/blog/posts/nextjs-data-fetching-cache-2026-08-10/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });
