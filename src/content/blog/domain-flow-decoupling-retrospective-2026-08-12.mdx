@@ -1,0 +1,231 @@
+---
+title: "도메인 흐름 회고: 검사는 완료하고 연결은 나중에 붙입니다"
+description: "검사 완료 API와 장비 연결 API를 한 트랜잭션처럼 묶었다가 실제 호출 순서에서 깨진 사례를 통해 도메인 상태, 선택적 연결, 회귀 테스트 경계를 정리한 실무 회고입니다."
+publishedAt: 2026-08-12T09:00:00+09:00
+draft: false
+category: "Backend"
+tags: ["Domain Modeling", "Spring Boot", "Transaction", "Regression Test"]
+kind: "worklog"
+heroImage: "../../assets/blog/domain-flow-decoupling-retrospective-2026-08-12/cover.webp"
+heroImageAlt: "검사 완료 흐름과 장비 연결 흐름이 별도 경로로 기록되고 감사 로그에서만 만나는 도메인 설계 다이어그램"
+imageCredit:
+  label: "AI 생성 이미지"
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+## 결론부터 말하면
+
+서버가 두 작업을 같은 도메인 흐름으로 묶고 있었지만, 실제 앱은 **검사 완료**와 **장비 연결**을 별도
+순서로 호출하고 있었습니다. 검사 결과는 독립적으로 확정할 수 있어야 했고, 연결 정보는 있으면 붙이는
+부가 상태에 가까웠습니다. 그런데 서버는 검사 성공 시점에 이미 연결된 장비가 있어야 한다고 가정했고,
+그 결과 정상적인 검사 완료 요청이 입력 오류처럼 실패할 수 있었습니다.
+
+이번 회고의 핵심은 세 가지였습니다.
+
+- 검사 결과 확정과 장비 연결은 같은 트랜잭션 경계가 아닙니다.
+- 연결 정보가 필요하다면 선행 조건이 아니라 선택적 후속 연결로 다룹니다.
+- 임시 호환 로직은 테스트를 통과해도 도메인 결합을 남길 수 있습니다.
+
+Spring Boot 개발자에게 익숙한 표현으로 말하면, 하나의 `@Transactional` 서비스 메서드 안에 들어갔다고
+하나의 유스케이스가 되는 것은 아닙니다. 상태 전이가 무엇을 확정하는지, 어떤 관계는 나중에 보강해도
+되는지, 실패가 어떤 API의 책임인지 먼저 나눠야 했습니다.
+
+> 검증일: 2026-08-12. Spring 공식 문서 기준 Spring Boot 안정 버전 `4.1.0`, Spring Framework
+> 안정 버전 `7.0.8`을 확인했습니다. 트랜잭션 기본 동작은 Spring Framework의 `@Transactional`
+> 설정, 전파 동작, transaction-bound event 공식 문서를 기준으로 작성했습니다.
+
+## 문제가 된 모양
+
+기존 설계에서는 검사가 성공하면 곧바로 "사용 중" 상태가 된다고 봤습니다. 그래서 검사 완료 로직은
+현재 사용자에게 활성 연결이 있는지 찾고, 그 연결에 검사 결과를 붙이려 했습니다.
+
+처음에는 자연스러워 보였습니다. 검사가 성공했다는 것은 곧 실제 장비를 쓰기 시작했다는 뜻처럼 보였기
+때문입니다. 하지만 앱의 실제 호출 순서는 달랐습니다. 검사 완료 요청이 먼저 오고, 장비 연결 요청은
+그 뒤에 올 수 있었습니다. 두 요청은 같은 화면 흐름에 있더라도 서버 입장에서는 서로 다른 명령이었습니다.
+
+| 구분 | 서버가 가정한 흐름 | 실제로 필요했던 흐름 |
+|---|---|---|
+| 검사 완료 | 활성 연결이 있어야 성공 | 검사 결과 자체는 독립적으로 확정 |
+| 장비 연결 | 검사 성공 처리 안에서 함께 반영 | 별도 API가 연결 상태를 생성 |
+| 실패 처리 | 연결 없음은 검사 실패 | 연결 없음은 후속 연결 대기 또는 연결 정보 없음 |
+| 테스트 기준 | 연결이 있는 정상 케이스 중심 | 호출 순서가 바뀐 케이스와 재시도 포함 |
+
+문제는 "연결을 기록하지 말자"가 아니었습니다. 검사 결과와 연결 상태의 생명주기가 다르다는 점을 코드가
+표현하지 못한 것이 문제였습니다.
+
+<Mermaid title="검사 완료와 장비 연결 흐름 분리">
+{`flowchart TD
+  InspectionRequest["검사 완료 요청"] --> ValidateInspection["검사 결과 검증"]
+  ValidateInspection --> SaveInspection["검사 결과 확정"]
+  SaveInspection --> Audit["감사 로그 기록"]
+
+  ConnectionRequest["장비 연결 요청"] --> ValidateConnection["장비 연결 검증"]
+  ValidateConnection --> SaveConnection["활성 연결 생성"]
+  SaveConnection --> LinkOptional["최근 검사 결과와 선택적 연결"]
+  LinkOptional --> Audit
+
+  SaveInspection -. 연결이 없어도 성공 .-> PendingLink["연결 정보 없음"]
+  PendingLink -. 후속 요청에서 보강 .-> LinkOptional
+`}
+</Mermaid>
+
+## 먼저 상태 이름을 바꿔 봅니다
+
+도메인 결합은 보통 상태 이름에서 먼저 드러납니다. "검사 성공이면 사용 중"처럼 이름을 붙이면 구현도
+그 방향으로 끌려갑니다. 이번에는 상태를 아래처럼 다시 봐야 했습니다.
+
+| 상태 | 의미 | 연결 필요 여부 |
+|---|---|---|
+| `PASSED` | 검사 결과가 유효하게 완료됨 | 필요 없음 |
+| `LINKED` | 검사 결과가 특정 연결 이력과 연결됨 | 필요함 |
+| `ACTIVE` | 현재 사용자가 장비를 연결 중임 | 검사 결과와 독립 |
+
+`PASSED`와 `ACTIVE`를 같은 순간에 만들 수는 있습니다. 다만 항상 그래야 하는 것은 아닙니다. 외부 장비,
+모바일 앱, 서버 API가 얽히면 호출 순서는 네트워크와 화면 전환에 따라 달라질 수 있습니다. 상태 이름이
+그 가능성을 막고 있으면 코드도 예외 케이스를 계속 늘리게 됩니다.
+
+## 임시 호환 로직은 결합을 숨길 수 있습니다
+
+처음에는 연결이 없을 때 검사 결과를 대기 상태로 저장하고, 나중에 연결 요청이 오면 자동으로 붙이는
+방식을 넣었습니다. 급한 실패를 막는 데는 도움이 됐지만, 다시 보니 이 방식도 조심해야 했습니다.
+
+검사 완료가 장비 연결을 기다린다는 모델을 유지하기 때문입니다. 정말 필요한 것은 "기다렸다가 자동
+사용 처리"가 아니라 "검사 결과는 확정했고, 연결 이력은 아직 없을 수 있다"는 모델이었습니다.
+
+차이는 작지만 책임이 달라집니다.
+
+```java
+public InspectionResult completeInspection(CompleteInspectionCommand command) {
+    InspectionResult result = inspectionValidator.validate(command);
+    InspectionRecord record = inspectionRepository.savePassed(result);
+
+    connectionLinker.attachIfCurrentConnectionExists(record, command.subjectId());
+    auditLog.recordInspectionCompleted(record.id());
+
+    return InspectionResult.from(record);
+}
+```
+
+위 코드에서 `attachIfCurrentConnectionExists`는 실패해도 검사 결과 확정을 되돌리지 않는 선택적 보강입니다.
+연결이 반드시 필요하다면 메서드 이름과 실패 정책이 달라져야 합니다. 예를 들어 `requireActiveConnection`
+처럼 저장 전에 실패시키는 명령이 되어야 합니다.
+
+중요한 것은 둘을 섞지 않는 것입니다. 선택적 보강처럼 이름을 붙여 놓고 내부에서 런타임 예외를 던져
+전체 트랜잭션을 롤백하면, 코드 이름과 실제 계약이 달라집니다.
+
+## 트랜잭션 경계는 유스케이스 단위로 봅니다
+
+Spring의 `@Transactional` 기본 전파는 `REQUIRED`입니다. 바깥 트랜잭션이 있으면 같은 물리 트랜잭션에
+참여합니다. 이 기본값은 편하지만, 선택적 부가 처리를 같은 트랜잭션 안에 넣을 때 위험해질 수 있습니다.
+
+검사 결과 저장과 연결 보강을 한 트랜잭션으로 묶는다면 다음 중 하나를 명확히 정해야 합니다.
+
+| 선택 | 의미 | 주의점 |
+|---|---|---|
+| 같은 트랜잭션 | 연결 보강 실패도 전체 실패 | 정말 필수 관계일 때만 사용 |
+| 검사 저장 후 best-effort 보강 | 검사 성공은 유지, 연결 실패는 별도 기록 | 예외를 잡고 감사 로그나 재시도 기준 필요 |
+| 후속 이벤트 | 커밋 후 연결 보강 시도 | 최종 일관성과 중복 처리 필요 |
+
+Spring의 transaction-bound event를 쓰면 커밋 이후 후속 처리를 분리할 수 있습니다. 다만 이벤트로 빼는
+것이 정답이라는 뜻은 아닙니다. 같은 요청 안에서 즉시 연결해도 됩니다. 핵심은 실패 정책을 코드가
+드러내야 한다는 점입니다.
+
+```java
+@Transactional
+public InspectionRecord completeInspection(CompleteInspectionCommand command) {
+    InspectionRecord record = inspectionService.savePassed(command);
+    applicationEventPublisher.publishEvent(new InspectionCompleted(record.id()));
+    return record;
+}
+
+@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+public void linkAfterCommit(InspectionCompleted event) {
+    connectionLinker.attachIfPossible(event.inspectionId());
+}
+```
+
+이 방식은 검사 결과 확정을 먼저 보호합니다. 연결 보강이 실패하면 재시도 큐나 운영 알림으로 다룰 수
+있지만, 이미 성공한 검사 완료 응답을 뒤늦게 실패로 바꾸지는 않습니다.
+
+## 회귀 테스트는 호출 순서를 바꿔 써야 합니다
+
+이번 문제는 "연결된 상태에서 검사하면 성공한다"는 테스트만으로는 잡히지 않습니다. 실제 앱이 보낸
+순서를 그대로 테스트해야 합니다.
+
+| 테스트 | 기대값 |
+|---|---|
+| 활성 연결이 없는 상태에서 검사 완료 요청이 온다 | 검사 결과는 `PASSED`로 저장된다 |
+| 검사 완료 후 장비 연결 요청이 온다 | 연결 이력이 생성되고 검사 결과와 선택적으로 연결된다 |
+| 연결 요청이 실패한다 | 이미 저장된 검사 결과는 유지된다 |
+| 같은 검사 완료 요청이 재시도된다 | 중복 결과를 만들지 않거나 멱등 응답을 반환한다 |
+| 운영 장비가 다른 사용자에게 연결되어 있다 | 연결은 거부하되 검사 실패와 혼동하지 않는다 |
+| 연결 보강 중 예외가 난다 | 서버 오류 추적은 남기되 검사 확정 계약은 보호한다 |
+
+JUnit 예시는 아래 정도로 줄일 수 있습니다.
+
+```java
+@Test
+void completeInspectionDoesNotRequireActiveConnection() {
+    CompleteInspectionCommand command = validInspectionWithoutActiveConnection();
+
+    InspectionResult result = inspectionService.complete(command);
+
+    assertThat(result.status()).isEqualTo(InspectionStatus.PASSED);
+    assertThat(inspectionRepository.existsByClientKey(command.clientKey())).isTrue();
+    assertThat(connectionRepository.findActive(command.subjectId())).isEmpty();
+}
+
+@Test
+void laterConnectionCanAttachPreviousInspection() {
+    InspectionResult inspection = inspectionService.complete(validInspectionWithoutActiveConnection());
+
+    ConnectionResult connection = connectionService.connect(validConnectionCommand());
+
+    assertThat(connection.status()).isEqualTo(ConnectionStatus.ACTIVE);
+    assertThat(linkRepository.exists(inspection.id(), connection.id())).isTrue();
+}
+```
+
+테스트 이름은 구현 세부보다 계약을 말해야 합니다. "연결이 없으면 검사 완료가 실패하지 않는다"와
+"후속 연결은 이전 검사 결과를 보강할 수 있다"가 이 회귀의 핵심 계약입니다.
+
+## 작은 실습: API를 명령 단위로 나눠 봅니다
+
+비슷한 문제가 보이면 코드부터 고치기 전에 아래 표를 채워 보는 편이 낫습니다.
+
+| 질문 | 답해야 하는 내용 |
+|---|---|
+| 이 API가 확정하는 상태는 무엇인가 | 검사 결과, 연결 상태, 사용 상태 중 하나 |
+| 다른 상태가 없으면 실패해야 하는가 | 필수 선행 조건인지 선택적 보강인지 |
+| 후속 API가 같은 정보를 다시 보낼 수 있는가 | 멱등 키와 중복 처리 기준 |
+| 실패한 보강은 어디에 남기는가 | 감사 로그, 재시도 큐, 운영 알림 |
+| 기존 클라이언트 호출 순서는 무엇인가 | 실제 앱 네트워크 로그 또는 계약 테스트 |
+| 트랜잭션이 보호해야 하는 최소 단위는 무엇인가 | 반드시 함께 커밋되어야 하는 상태 |
+
+이 표가 비어 있으면 서비스 메서드는 금방 커집니다. 반대로 명령이 확정하는 상태를 하나로 좁히면
+트랜잭션, 이벤트, 예외 분류, 회귀 테스트가 자연스럽게 정리됩니다.
+
+## 참고자료
+
+- [Spring Boot 공식 프로젝트 페이지](https://spring.io/projects/spring-boot) -
+  2026년 8월 12일 확인, Stable `4.1.0` 기준
+- [Spring Boot System Requirements](https://docs.spring.io/spring-boot/system-requirements.html) -
+  Spring Boot `4.1.0`, Spring Framework `7.0.8` 이상 요구 기준
+- [Spring Framework 공식 프로젝트 페이지](https://spring.io/projects/spring-framework) -
+  2026년 8월 12일 확인, Stable `7.0.8` 기준
+- [Spring Framework Reference, "Using @Transactional"](https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/annotations.html) -
+  `@Transactional` 기본 rollback 및 전파 설정 기준
+- [Spring Framework Reference, "Transaction Propagation"](https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/tx-propagation.html) -
+  `REQUIRED`, `REQUIRES_NEW`, `NESTED` 전파 동작 기준
+- [Spring Framework Reference, "Transaction-bound Events"](https://docs.spring.io/spring-framework/reference/data-access/transaction/event.html) -
+  커밋 전후 이벤트 처리 기준
+
+## 오늘의 결론
+
+도메인 흐름을 분리한다는 것은 화면을 나누거나 API를 늘리는 일이 아닙니다. 한 명령이 어떤 상태를
+확정하는지 좁히고, 그 밖의 관계는 필수인지 선택인지 이름과 실패 정책으로 드러내는 일입니다.
+
+검사 완료와 장비 연결을 분리하자 문제는 단순해졌습니다. 검사 결과는 검사 결과대로 저장하고, 연결
+상태는 별도 흐름으로 만들며, 둘의 관계는 가능한 시점에 보강합니다. 이렇게 해야 실제 클라이언트 호출
+순서가 조금 흔들려도 서버의 도메인 계약은 흔들리지 않습니다.
