@@ -62,12 +62,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: "도메인 흐름 회고",
+      name: "운영 API 테스트 회고",
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: "2026년 8월 둘째 주 IT 기술동향",
+      name: "도메인 흐름 회고",
     }),
   ).toBeVisible();
 });

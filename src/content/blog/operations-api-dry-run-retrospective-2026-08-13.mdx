@@ -1,0 +1,262 @@
+---
+title: "운영 API 테스트 회고: 미리보기와 드라이런을 같은 버튼에 두지 않습니다"
+description: "운영자가 사용자 권한으로 API를 재현할 때 요청 미리보기, 서버 드라이런, 실제 실행을 분리하고 권한·감사·트랜잭션 경계를 명확히 한 실무 회고입니다."
+publishedAt: 2026-08-13T09:00:00+09:00
+draft: false
+category: "Backend"
+tags: ["Spring Boot", "API Design", "Spring Security", "Transaction"]
+kind: "worklog"
+heroImage: "../../assets/blog/operations-api-dry-run-retrospective-2026-08-13/cover.webp"
+heroImageAlt: "운영 API 요청이 미리보기, 서버 드라이런, 실제 실행 세 경로로 나뉘어 처리되는 기술 다이어그램"
+imageCredit:
+  label: "AI 생성 이미지"
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+## 결론부터 말하면
+
+운영자가 실제 사용자 권한으로 API를 재현할 수 있는 도구를 만들 때 가장 위험한 지점은 **테스트 버튼이
+실제 쓰기 요청처럼 동작하는 순간**이었습니다. 읽기 API는 비교적 단순하지만, 쓰기 API는 요청을 한 번
+잘못 보내면 데이터, 감사 로그, 외부 이벤트가 함께 바뀔 수 있습니다.
+
+그래서 실행 방식을 세 단계로 나눴습니다.
+
+- 요청 미리보기는 서버에 보내지 않고 최종 URL, 헤더, 본문만 확인합니다.
+- 서버 드라이런은 실제 검증 로직을 통과하되 DB 변경은 롤백합니다.
+- 실제 실행은 명시 확인을 받은 뒤에만 서버와 DB에 반영합니다.
+
+Spring Boot 개발자에게 익숙한 표현으로 말하면, 운영 도구도 하나의 클라이언트입니다. 관리자 화면에서
+눌렀다는 이유만으로 컨트롤러, 보안 필터, 서비스 트랜잭션, 감사 로그의 계약을 우회하면 안 됩니다.
+오히려 운영 도구일수록 "이 버튼은 어디까지 부작용을 만들 수 있는가"를 코드와 화면이 같이 설명해야
+했습니다.
+
+> 검증 범위: 2026-08-13에 Spring 공식 문서 기준 Spring Boot 안정 버전 `4.1.0`,
+> Spring Framework 안정 버전 `7.0.8`, Spring Security 안정 버전 `7.1.0`을 확인했습니다.
+> 설명은 Spring Security Servlet Architecture, Spring MVC Interceptors, `@Transactional`,
+> rollback rules, transaction propagation 공식 문서를 기준으로 작성했습니다.
+
+## 문제가 된 모양
+
+운영 중인 API 문제를 재현하려면 실제 사용자와 비슷한 권한, 비슷한 헤더, 비슷한 요청 본문이 필요합니다.
+Swagger 화면이나 curl만으로는 "해당 사용자가 앱에서 보냈을 때"의 조건을 매번 맞추기 어렵습니다.
+
+처음에는 운영자용 테스트 화면에서 사용자와 API를 고르고 실행하면 충분해 보였습니다. 하지만 쓰기 API가
+섞이자 문제가 달라졌습니다. 운영자가 원한 것은 "이 요청이 어떤 모양으로 나갈지", "서버 검증을 통과할지",
+"정말 데이터를 바꿔도 되는지"를 단계별로 확인하는 일이었습니다. 이 셋을 하나의 실행 버튼에 넣으면
+실수와 검증이 같은 동작이 됩니다.
+
+| 구분 | 운영자가 확인하고 싶은 것 | 잘못 섞으면 생기는 위험 |
+|---|---|---|
+| 요청 미리보기 | URL, 헤더, 파라미터, 본문 | 서버 검증 여부를 확인했다고 착각 |
+| 서버 드라이런 | 권한, 검증, 컨트롤러 흐름 | 롤백할 수 없는 부작용까지 실행 |
+| 실제 실행 | 운영 변경 반영 | 미리보기 실수로 데이터 변경 |
+| 감사 로그 | 누가 왜 실행했는지 | 테스트 토큰이나 민감 값 저장 |
+
+핵심은 드라이런을 "실행하지 않는다"로 정의하지 않는 것입니다. 서버 드라이런은 실행합니다. 다만 커밋하지
+않을 수 있는 범위에서만 실행합니다. 그래서 어떤 API가 드라이런 가능한지도 명시적인 정책으로 관리해야
+했습니다.
+
+<Mermaid title="운영 API 실행 단계 분리">
+{`flowchart TD
+  Operator["운영자 입력"] --> Preview["요청 미리보기"]
+  Preview --> Confirm{"확인 문구 입력"}
+
+  Confirm -->|드라이런| AuthDry["서버 권한 재확인"]
+  AuthDry --> ValidateDry["컨트롤러와 서비스 검증"]
+  ValidateDry --> Rollback["DB 트랜잭션 롤백"]
+  Rollback --> DryResult["응답과 검증 결과만 반환"]
+
+  Confirm -->|실제 실행| AuthRun["서버 권한 재확인"]
+  AuthRun --> ValidateRun["컨트롤러와 서비스 검증"]
+  ValidateRun --> Commit["DB 커밋"]
+  Commit --> Audit["감사 로그 기록"]
+
+  Preview -. 서버 전송 없음 .-> LocalOnly["로컬 표시"]
+`}
+</Mermaid>
+
+## 권한은 화면 상태가 아니라 서버 계약입니다
+
+운영 화면은 역할별 메뉴를 숨길 수 있습니다. 하지만 메뉴가 보이지 않는 것과 API가 보호되는 것은 다른
+문제입니다. 브라우저 상태에 있는 `isAdmin` 같은 값만 믿으면 권한 모델이 화면 구현에 끌려갑니다.
+
+쓰기 요청을 다루는 운영 도구에서는 서버가 매 요청마다 현재 역할과 권한을 다시 확인해야 했습니다.
+Spring Security 관점에서는 보안 처리가 MVC 컨트롤러 앞단의 필터 체인에서 시작된다는 점이 중요합니다.
+Spring MVC 인터셉터도 공통 전처리에 쓸 수 있지만, 공식 문서도 보안 계층으로는 필터 체인이나 Spring
+Security 쪽 접근을 권장합니다.
+
+간단히 줄이면 이런 구조가 됩니다.
+
+```java
+public ApiTestResult run(ApiTestCommand command, Operator operator) {
+    AccessSnapshot access = accessService.requireCurrentAccess(operator.id());
+    apiTestPolicy.requireAllowed(access, command.method(), command.path());
+
+    UserToken token = testTokenIssuer.issueFor(command.targetUserId(), operator.id());
+    return apiInvoker.invoke(command, token);
+}
+```
+
+여기서 중요한 점은 토큰 발급보다 앞에 서버 권한 확인이 있다는 것입니다. 화면에서 버튼이 보였더라도
+서버 정책을 통과하지 못하면 테스트 토큰도 만들지 않습니다. 또한 토큰 자체는 감사 로그에 저장하지
+않고, 실행한 운영자, 대상 사용자, API, 실행 모드, 사유 같은 판단 가능한 메타데이터만 남기는 편이
+안전합니다.
+
+## 드라이런은 허용 목록으로 시작합니다
+
+모든 쓰기 API를 드라이런으로 만들 수는 없습니다. 어떤 API는 같은 트랜잭션 안에서 검증과 저장이 끝나지만,
+어떤 API는 이벤트 발행, 외부 호출, 별도 트랜잭션, 파일 생성처럼 롤백하기 어려운 부작용을 가집니다.
+
+그래서 기본값은 "드라이런 불가"로 두고, 검증 가능한 API만 허용 목록에 올리는 편이 단순했습니다.
+
+| API 성격 | 드라이런 처리 |
+|---|---|
+| 단일 DB 트랜잭션 안에서 끝나는 검증·저장 | 허용 가능 |
+| `REQUIRES_NEW`처럼 독립 커밋이 섞인 흐름 | 기본 비허용 |
+| 메시지 큐, 웹훅, 캐시 무효화가 필수인 흐름 | 기본 비허용 |
+| 파일 업로드와 외부 스토리지 반영 | 별도 샌드박스 없으면 비허용 |
+| 멱등 키로 중복 방지가 명확한 내부 명령 | 정책 검토 후 허용 |
+
+코드는 정책 객체 하나로 시작해도 충분합니다.
+
+```java
+class DryRunPolicy {
+    private static final Set<ApiSignature> ALLOWED = Set.of(
+        ApiSignature.post("/api/v1/items"),
+        ApiSignature.delete("/api/v1/items/{id}"),
+        ApiSignature.post("/api/v1/items/{id}/check")
+    );
+
+    boolean isSupported(String method, String path) {
+        return ALLOWED.contains(ApiSignature.normalize(method, path));
+    }
+}
+```
+
+이 정책은 화면에도 내려줍니다. 지원하지 않는 API는 드라이런 버튼을 비활성화하고, 실제 실행만 가능하다는
+상태를 먼저 보여줍니다. 운영 도구에서 버튼이 보인다는 것은 하나의 계약입니다. 아직 보장하지 못하는
+실행 모드는 숨기거나 막아야 했습니다.
+
+## 트랜잭션 롤백과 부작용 롤백은 다릅니다
+
+`@Transactional`은 DB 변경을 묶는 데 강력하지만, 모든 부작용을 되돌려 주지는 않습니다. 같은 메서드 안에서
+외부 이벤트를 발행했거나 별도 트랜잭션을 열었다면 바깥 트랜잭션을 롤백해도 이미 나간 부작용은 남을 수
+있습니다.
+
+서버 드라이런을 구현할 때는 이 차이를 코드로 드러내야 했습니다.
+
+```java
+@Transactional
+public ApiTestResult dryRun(ApiTestCommand command) {
+    ApiTestResult result = dispatchToController(command);
+    TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
+    return result.withMode(ExecutionMode.DRY_RUN);
+}
+```
+
+위 코드는 단순한 예시입니다. 실제로는 예외가 났을 때도 응답 형식과 롤백 상태를 보장해야 하고, 감사
+이벤트 생산자에는 드라이런 문맥을 전달해야 합니다. 핵심은 "롤백 표시를 했다"가 아니라 "이 경로에서
+롤백 밖 부작용이 발생하지 않는다"를 테스트로 증명하는 것입니다.
+
+특히 `REQUIRES_NEW`가 섞인 서비스는 조심해야 합니다. Spring transaction propagation에서 독립 트랜잭션은
+바깥 트랜잭션과 다른 물리 트랜잭션을 사용할 수 있습니다. 이런 흐름은 드라이런 허용 목록에 넣기 전에
+커밋 경계를 따로 검토해야 합니다.
+
+## 실제 실행에는 마찰이 필요합니다
+
+운영 도구의 마찰은 불편함이 아니라 계약의 일부입니다. 실제 실행과 서버 드라이런에는 확인 문구를 요구하고,
+쓰기 요청에는 실행 사유를 필수로 받는 식입니다. 반면 요청 미리보기는 빠르게 반복할 수 있어야 합니다.
+
+| 단계 | 필요한 마찰 | 이유 |
+|---|---|---|
+| 요청 미리보기 | 없음 | URL과 본문을 여러 번 고쳐 봐야 함 |
+| 서버 드라이런 | 확인 문구 | 실제 서버 검증과 일부 내부 흐름을 실행함 |
+| 실제 실행 | 확인 문구와 사유 | 데이터 변경과 감사 대상 |
+| 지원 불가 드라이런 | 실행 차단 | 롤백 가능성을 보장하지 못함 |
+
+이 구조를 두면 운영자는 버튼을 누르기 전에 자신이 하는 일을 구분할 수 있습니다. 또한 감사 로그도 단순히
+"테스트 도구 실행"이 아니라 "드라이런인지 실제 실행인지, 어떤 사유인지"를 기록할 수 있습니다.
+
+## 회귀 테스트는 부작용이 없음을 확인해야 합니다
+
+운영 도구 테스트는 응답 상태만 보면 부족합니다. 드라이런이 성공했다면 DB 변경, 감사 이벤트, 외부 이벤트가
+남지 않았는지를 같이 봐야 합니다. 실제 실행은 반대로 필요한 감사 로그가 남았는지 확인해야 합니다.
+
+| 테스트 | 기대값 |
+|---|---|
+| 읽기 API를 실행한다 | 대상 사용자 권한으로 조회하고 감사 메타데이터를 남긴다 |
+| 쓰기 API를 미리보기한다 | 서버 호출 없이 URL, 헤더, 본문만 만든다 |
+| 허용된 쓰기 API를 드라이런한다 | 응답은 반환되지만 DB 변경은 롤백된다 |
+| 드라이런 중 감사 이벤트가 발생할 수 있는 경로를 탄다 | 실제 감사 이벤트는 발행하지 않는다 |
+| 드라이런 미지원 API를 고른다 | 버튼과 서버 정책이 모두 실행을 거부한다 |
+| 실제 실행을 한다 | DB 변경과 감사 로그가 남고 테스트 토큰 원문은 저장하지 않는다 |
+| 권한이 없는 운영자가 요청한다 | 화면 상태와 무관하게 서버가 403으로 거부한다 |
+
+JUnit 예시는 아래 정도의 형태가 핵심을 잘 보여 줍니다.
+
+```java
+@Test
+void dryRunReturnsValidationResultWithoutCommitting() {
+    ApiTestCommand command = writeCommandSupportedByDryRun();
+
+    ApiTestResult result = apiTestService.dryRun(command, operator());
+
+    assertThat(result.mode()).isEqualTo(ExecutionMode.DRY_RUN);
+    assertThat(result.status()).isEqualTo(200);
+    assertThat(repository.existsByClientKey(command.clientKey())).isFalse();
+    assertThat(auditEventSpy.publishedEvents()).isEmpty();
+}
+```
+
+테스트 이름은 도구의 의도를 말해야 합니다. "API 테스트 성공"보다 "드라이런은 검증 결과를 돌려주지만
+커밋하지 않는다"가 더 오래 살아남는 계약입니다.
+
+## 작은 실습: 운영 버튼을 실행 모드로 분류합니다
+
+비슷한 운영 도구를 만들기 전에는 아래 표부터 채워 보는 편이 좋습니다.
+
+| 질문 | 답해야 하는 내용 |
+|---|---|
+| 이 버튼은 서버로 요청을 보내는가 | 미리보기와 실행의 첫 경계 |
+| 이 버튼은 DB를 커밋하는가 | 드라이런과 실제 실행의 경계 |
+| 롤백 밖 부작용이 있는가 | 이벤트, 파일, 외부 호출, 독립 트랜잭션 |
+| 누가 어떤 권한으로 누를 수 있는가 | 화면 노출과 서버 권한 정책 |
+| 무엇을 감사 로그에 남기는가 | 실행자, 대상, 사유, 모드, 결과 |
+| 무엇을 저장하면 안 되는가 | 테스트 토큰, 비밀값, 민감한 요청 원문 |
+| 지원하지 않는 실행 모드는 어떻게 보이는가 | 비활성화, 설명, 서버 차단 |
+
+이 표가 비어 있으면 운영 도구는 금방 "관리자라서 할 수 있는 만능 실행기"가 됩니다. 반대로 실행 모드를
+먼저 나누면 구현은 단순해집니다. 미리보기는 클라이언트 조립 로직, 드라이런은 제한된 서버 정책, 실제
+실행은 명시 감사 계약으로 분리됩니다.
+
+## 참고자료
+
+- [Spring Boot 공식 프로젝트 페이지](https://spring.io/projects/spring-boot) -
+  2026년 8월 13일 확인, Stable `4.1.0` 기준
+- [Spring Framework 공식 프로젝트 페이지](https://spring.io/projects/spring-framework) -
+  2026년 8월 13일 확인, Stable `7.0.8` 기준
+- [Spring Security 공식 프로젝트 페이지](https://spring.io/projects/spring-security) -
+  2026년 8월 13일 확인, Stable `7.1.0` 기준
+- [Spring Security Reference, "Architecture"](https://docs.spring.io/spring-security/reference/servlet/architecture.html) -
+  Servlet FilterChain과 Spring Security 필터 체인 기준
+- [Spring Security Reference, "Java Configuration"](https://docs.spring.io/spring-security/reference/servlet/configuration/java.html) -
+  `springSecurityFilterChain` 구성 기준
+- [Spring Framework Reference, "Interception"](https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-servlet/handlermapping-interceptor.html) -
+  MVC 인터셉터와 보안 계층 분리 기준
+- [Spring Framework Reference, "Using @Transactional"](https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/annotations.html) -
+  선언적 트랜잭션 설정 기준
+- [Spring Framework Reference, "Transaction Propagation"](https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/tx-propagation.html) -
+  `REQUIRES_NEW`, `NESTED` 등 전파 동작 기준
+- [Spring Framework Reference, "Rolling Back a Declarative Transaction"](https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/rolling-back.html) -
+  rollback 규칙 기준
+
+## 오늘의 결론
+
+운영 API 테스트 도구는 빠르게 문제를 재현하게 해 주지만, 그만큼 부작용 경계를 더 엄격히 가져야 합니다.
+미리보기, 서버 드라이런, 실제 실행을 같은 버튼의 옵션처럼 대충 묶으면 운영자는 자신이 무엇을 바꾸는지
+늦게 알게 됩니다.
+
+단계를 분리하자 판단이 쉬워졌습니다. 요청 모양만 볼 때는 서버에 보내지 않습니다. 서버 검증을 보고 싶을
+때는 드라이런 허용 목록 안에서만 롤백합니다. 실제 변경이 필요할 때는 확인 문구와 사유를 남기고 실행합니다.
+운영 도구의 품질은 기능 수보다 이 경계를 얼마나 정직하게 드러내는지에 달려 있었습니다.
