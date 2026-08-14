@@ -5,15 +5,15 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(13);
+  expect(entries).toHaveLength(14);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "운영 API 테스트 회고: 미리보기와 드라이런을 같은 버튼에 두지 않습니다",
+    "트랜잭션 경계 심화: 커밋할 것과 미룰 것을 분리합니다",
   );
   expect(entries[0].href).toBe(
-    "/blog/posts/operations-api-dry-run-retrospective-2026-08-13/",
+    "/blog/posts/transaction-boundary-side-effects-2026-08-14/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });
