@@ -141,14 +141,14 @@ Next.js에서도 책임은 사라지지 않습니다. 다만 위치가 달라집
 
 가장 큰 차이는 서버 변경 함수가 UI 파일 가까이에 놓인다는 점입니다.
 
-<Mermaid
-  chart={`flowchart LR
+<Mermaid title="Next.js 폼 제출과 서버 변경 흐름">
+{`flowchart LR
   A["form submit"] --> B["Server Action"]
   B --> C["입력 검증"]
   C --> D["저장 또는 외부 API 호출"]
   D --> E["revalidatePath / revalidateTag"]
   E --> F["redirect 또는 상태 반환"]`}
-/>
+</Mermaid>
 
 이 흐름은 Spring MVC의 POST Controller와 닮았지만, 두 가지를 특히 조심해야 합니다.
 
