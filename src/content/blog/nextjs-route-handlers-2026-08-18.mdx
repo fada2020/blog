@@ -1,0 +1,374 @@
+---
+title: "Spring Boot 개발자를 위한 Next.js Route Handlers: API 경계와 화면 경계 분리하기"
+description: "Spring MVC 컨트롤러와 비교하며 Next.js App Router의 route.ts가 언제 필요한지, page.tsx와 어떤 책임을 나누는지 정리합니다."
+publishedAt: 2026-08-18T09:00:00+09:00
+draft: false
+category: "Frontend"
+tags: ["Next.js", "React", "Spring Boot", "Route Handlers", "API"]
+kind: "learning"
+heroImage: "../../assets/blog/nextjs-route-handlers-2026-08-18/cover.webp"
+heroImageAlt: "브라우저 요청이 Next.js Route Handler와 화면 렌더링 경계로 나뉘어 처리되는 서버 아키텍처 다이어그램"
+imageCredit:
+  label: "AI 생성 이미지"
+series: "Spring 개발자의 프론트엔드 학습"
+lesson: 5
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 8월 18일에 npm 레지스트리의 `latest` 태그와 공식 문서를 확인했습니다.
+> 기준 버전은 `next@latest` 16.3.1, `react@latest` 19.2.8, `react-dom@latest` 19.2.8입니다.
+> `next@canary`, `next@preview`, React `canary`, `experimental` 태그는 안정판으로 다루지 않았습니다.
+> 설명은 [Next.js Route Handlers](https://nextjs.org/docs/app/getting-started/route-handlers),
+> [Next.js route.js API Reference](https://nextjs.org/docs/app/api-reference/file-conventions/route),
+> [Next.js Proxy](https://nextjs.org/docs/app/getting-started/proxy),
+> [Next.js Backend for Frontend](https://nextjs.org/docs/app/guides/backend-for-frontend)를 기준으로 확인했습니다.
+
+## 결론부터 말하면
+
+Next.js App Router에서 `route.ts`는 화면을 렌더링하는 Controller가 아니라 **명시적인 HTTP 계약을
+노출하는 가장 낮은 라우팅 단위**로 보는 편이 안전합니다.
+
+Spring Boot 개발자는 보통 `@GetMapping`, `@PostMapping`이 화면 Controller와 JSON API Controller
+양쪽에 모두 쓰이는 구조에 익숙합니다. Next.js에서는 같은 URL 세그먼트에 화면을 담당하는 `page.tsx`와
+HTTP 메서드를 담당하는 `route.ts`를 동시에 둘 수 없습니다. 화면 경로인지, API 경로인지 먼저 나눠야
+합니다.
+
+이번 글의 목표는 단순합니다.
+
+**Next.js에서 Route Handler가 필요한 순간과 Server Action, Proxy, 기존 Spring API 사이의 경계를
+구분합니다.**
+
+## 이번 주 개념
+
+Route Handler는 `app` 디렉터리 안의 `route.ts` 파일에서 HTTP 메서드 함수를 export해 만듭니다.
+공식 문서 기준으로 지원되는 메서드는 `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`입니다.
+지원하지 않는 메서드가 호출되면 Next.js는 `405 Method Not Allowed`를 반환합니다.
+
+```ts
+// app/api/products/route.ts
+export async function GET() {
+  const products = await productRepository.findVisibleProducts();
+
+  return Response.json({ products });
+}
+```
+
+```ts
+// app/api/products/route.ts
+export async function POST(request: Request) {
+  const body = await request.json();
+  const input = parseProductCreateRequest(body);
+
+  if (!input.ok) {
+    return Response.json({ errors: input.errors }, { status: 400 });
+  }
+
+  const product = await productRepository.create(input.value);
+
+  return Response.json({ product }, { status: 201 });
+}
+```
+
+여기서 중요한 점은 `route.ts`가 JSX를 반환하는 화면 파일이 아니라는 것입니다. Web 표준의 `Request`와
+`Response`를 기준으로 요청을 받고 응답을 돌려줍니다. Next.js는 여기에 `NextRequest`,
+`NextResponse` 같은 확장 API를 더해 쿠키, URL, 리다이렉트 같은 편의 기능을 제공합니다.
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Spring MVC에서는 같은 Controller 문법으로 화면과 API를 모두 만들 수 있습니다.
+
+```java
+@RestController
+@RequestMapping("/api/products")
+class ProductApiController {
+
+    private final ProductService productService;
+
+    @GetMapping
+    List<ProductResponse> findProducts() {
+        return productService.findVisibleProducts();
+    }
+
+    @PostMapping
+    ResponseEntity<ProductResponse> create(@Valid @RequestBody ProductCreateRequest request) {
+        ProductResponse product = productService.create(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(product);
+    }
+}
+```
+
+```java
+@Controller
+@RequestMapping("/products")
+class ProductPageController {
+
+    @GetMapping
+    String page(Model model) {
+        model.addAttribute("products", productService.findVisibleProducts());
+        return "products/list";
+    }
+}
+```
+
+둘 다 `@GetMapping`을 쓰지만 반환 계약이 다릅니다. 하나는 JSON API이고, 하나는 HTML 화면입니다.
+Spring에서는 어노테이션과 반환 타입이 이 차이를 드러냅니다. Next.js에서는 파일 위치가 이 차이를 더
+강하게 드러냅니다.
+
+## Next.js에서는 무엇이 다른가
+
+App Router는 같은 세그먼트에서 `page.tsx`와 `route.ts`가 충돌합니다. 예를 들어 `/products` 화면을
+만드는 파일이 `app/products/page.tsx`라면, 같은 경로에 `app/products/route.ts`를 추가할 수 없습니다.
+
+<Mermaid title="page.tsx와 route.ts의 책임 분리">
+{`flowchart LR
+  A["/products"] --> B["app/products/page.tsx"]
+  A -. 같은 세그먼트 불가 .-> C["app/products/route.ts"]
+  D["/api/products"] --> E["app/api/products/route.ts"]
+  B --> F["화면 렌더링"]
+  E --> G["HTTP API 응답"]`}
+</Mermaid>
+
+따라서 화면과 API를 모두 제공하려면 보통 아래처럼 경로를 분리합니다.
+
+```text
+app/
+  products/
+    page.tsx
+  api/
+    products/
+      route.ts
+```
+
+이 구조는 Spring MVC의 화면 Controller와 `@RestController`를 패키지나 클래스 단위로 나누는 것과
+비슷합니다. 차이는 Next.js에서는 파일 시스템이 라우팅 계약이므로, 같은 URL 세그먼트의 주인을 하나만
+둘 수 있다는 점입니다.
+
+## 대응 개념 비교
+
+Spring Boot 개발자가 Route Handler를 읽을 때는 아래처럼 대응시키면 됩니다.
+
+| Spring Boot | Next.js App Router |
+|---|---|
+| `@RestController` | `app/**/route.ts` |
+| `@GetMapping`, `@PostMapping` | `export async function GET`, `POST` |
+| `HttpServletRequest` | Web `Request`, `NextRequest` |
+| `ResponseEntity` | Web `Response`, `Response.json()` |
+| path variable | `context.params`, `RouteContext` |
+| servlet filter | `proxy.ts`, 별도 서버 인증 계층 |
+| HTML Controller | `page.tsx` |
+
+다만 이 표를 그대로 1:1 이식하면 위험합니다. Route Handler는 작은 BFF 경계나 웹훅 수신처럼 HTTP
+계약이 필요한 곳에 적합합니다. 복잡한 도메인 트랜잭션, 장시간 처리, 내부 시스템 권한 모델까지
+Next.js 쪽으로 옮기는 것은 별도 설계 판단이 필요합니다.
+
+## 최소 실행 예제
+
+동적 경로의 파라미터는 `context.params`에서 읽습니다. Next.js 16 문서 기준으로 `params`는 Promise로
+다룹니다.
+
+```ts
+// app/api/products/[id]/route.ts
+import type { NextRequest } from "next/server";
+
+type ProductRouteContext = {
+  params: Promise<{ id: string }>;
+};
+
+export async function GET(_request: NextRequest, context: ProductRouteContext) {
+  const { id } = await context.params;
+  const product = await productRepository.findById(id);
+
+  if (!product) {
+    return Response.json({ message: "상품을 찾을 수 없습니다." }, { status: 404 });
+  }
+
+  return Response.json({ product });
+}
+```
+
+Next.js가 생성하는 타입을 사용한다면 `RouteContext` 헬퍼로 경로 문자열에서 파라미터 타입을 얻을 수
+있습니다.
+
+```ts
+// app/api/products/[id]/route.ts
+import type { NextRequest } from "next/server";
+
+export async function GET(
+  _request: NextRequest,
+  context: RouteContext<"/api/products/[id]">,
+) {
+  const { id } = await context.params;
+
+  return Response.json({ id });
+}
+```
+
+POST 요청에서는 입력 파싱과 실패 응답을 명확히 둡니다. Spring MVC의 `@Valid`와 `BindingResult`가
+하던 일을 Route Handler 안에서 직접 드러내는 셈입니다.
+
+```ts
+// app/api/products/route.ts
+type ProductCreateInput = {
+  name: string;
+  price: number;
+};
+
+function parseProductCreateRequest(body: unknown):
+  | { ok: true; value: ProductCreateInput }
+  | { ok: false; errors: Record<string, string> } {
+  if (!body || typeof body !== "object") {
+    return { ok: false, errors: { body: "요청 본문이 필요합니다." } };
+  }
+
+  const record = body as Record<string, unknown>;
+  const name = typeof record.name === "string" ? record.name.trim() : "";
+  const price = typeof record.price === "number" ? record.price : Number(record.price);
+
+  if (!name || !Number.isFinite(price) || price < 0) {
+    return {
+      ok: false,
+      errors: {
+        name: "상품 이름이 필요합니다.",
+        price: "가격은 0 이상의 숫자여야 합니다.",
+      },
+    };
+  }
+
+  return { ok: true, value: { name, price } };
+}
+
+export async function POST(request: Request) {
+  const input = parseProductCreateRequest(await request.json());
+
+  if (!input.ok) {
+    return Response.json({ errors: input.errors }, { status: 400 });
+  }
+
+  const product = await productRepository.create(input.value);
+
+  return Response.json({ product }, { status: 201 });
+}
+```
+
+## Route Handler와 Server Action을 나누는 기준
+
+이전 글에서는 폼 제출을 Server Action으로 처리했습니다. Route Handler도 POST를 받을 수 있으니 둘이
+겹쳐 보입니다. 기준은 호출자가 누구인지입니다.
+
+| 질문 | Server Action | Route Handler |
+|---|---|---|
+| 호출자가 같은 Next.js 화면인가 | 적합합니다 | 필요하지 않을 수 있습니다 |
+| 외부 클라이언트가 호출해야 하는가 | 부적합합니다 | 적합합니다 |
+| 웹훅처럼 HTTP 계약이 먼저인가 | 부적합합니다 | 적합합니다 |
+| 성공 후 화면 재검증과 리다이렉트가 핵심인가 | 적합합니다 | 우회적입니다 |
+| JSON, 상태 코드, 헤더가 계약인가 | 우회적입니다 | 적합합니다 |
+
+상품 등록 화면 하나만 처리한다면 Server Action이 더 단순할 수 있습니다. 반대로 모바일 앱, 외부 파트너,
+웹훅, 별도 백엔드가 같은 계약을 호출해야 한다면 Route Handler가 더 자연스럽습니다.
+
+## Route Handler와 Proxy를 나누는 기준
+
+Next.js 16부터 Middleware는 Proxy라는 이름을 씁니다. 공식 문서는 Proxy를 요청 완료 전에 실행되는
+얇은 경계로 설명합니다. 리다이렉트, 헤더 수정, 간단한 요청 기반 분기에는 쓸 수 있지만, 느린 데이터
+조회나 전체 세션 관리와 권한 판정을 맡기는 용도는 아닙니다.
+
+Spring Security의 필터 체인과 비교하면 이해하기 쉽습니다. 필터는 요청을 일찍 보고 통과 여부를
+판단할 수 있지만, 도메인 규칙 전체를 필터에 넣지 않습니다. Proxy도 마찬가지입니다.
+
+```ts
+// proxy.ts
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+
+export function proxy(request: NextRequest) {
+  const hasSession = Boolean(request.cookies.get("session"));
+
+  if (!hasSession && request.nextUrl.pathname.startsWith("/dashboard")) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: "/dashboard/:path*",
+};
+```
+
+이 정도는 Proxy가 맡을 수 있습니다. 하지만 사용자가 특정 상품을 수정할 수 있는지, 결제 상태가 유효한지,
+재시도해도 안전한 요청인지 같은 판단은 Route Handler나 기존 Spring API의 서버 로직에서 다시 확인해야
+합니다.
+
+## 캐시와 런타임 동작
+
+Route Handler는 기본적으로 캐시되지 않습니다. 단, `GET` 메서드는 route config를 통해 캐시를 선택할 수
+있습니다. 공식 문서 예시처럼 `export const dynamic = "force-static"` 같은 설정을 사용하면 정적 응답을
+의도할 수 있습니다. 다른 HTTP 메서드는 같은 파일에 캐시된 `GET`이 있어도 캐시되지 않습니다.
+
+이 지점은 Spring Boot 개발자에게 낯설 수 있습니다. Spring에서는 Controller 메서드 자체보다 HTTP 캐시
+헤더, CDN, 애플리케이션 캐시가 따로 보이는 경우가 많습니다. Next.js에서는 라우팅 파일과 캐시 모델이
+가깝게 붙어 있으므로, `GET`을 만들 때 아래 질문을 먼저 해야 합니다.
+
+| 질문 | 판단 |
+|---|---|
+| 요청마다 사용자 쿠키나 헤더를 읽는가 | 정적 캐시 대상으로 보지 않습니다 |
+| 공개 데이터이고 잠깐 오래되어도 되는가 | 캐시 선택을 검토할 수 있습니다 |
+| 외부 API 키나 DB 조회가 필요한가 | 캐시 범위와 재검증 정책을 분리합니다 |
+| POST, PATCH, DELETE인가 | 캐시보다 멱등성, 검증, 상태 코드가 우선입니다 |
+
+## Java 개발자가 자주 하는 오해
+
+### Route Handler는 모든 백엔드를 대체한다
+
+그렇지 않습니다. Route Handler는 Next.js 애플리케이션 안에서 HTTP endpoint를 만드는 기능입니다.
+도메인 트랜잭션, 배치, 내부 권한 모델, 데이터 소유권이 이미 Spring Boot에 있다면 그 책임을 억지로
+옮길 이유가 없습니다. Next.js는 BFF나 얇은 어댑터가 될 수 있습니다.
+
+### page.tsx 옆에 같은 URL의 route.ts를 두면 된다
+
+같은 세그먼트에서는 충돌합니다. 화면 경로와 API 경로를 분리하거나, 화면은 `page.tsx`, API는
+`app/api/**/route.ts`처럼 별도 세그먼트로 둬야 합니다.
+
+### Route Handler 안에서는 인증을 생략해도 된다
+
+아닙니다. 클라이언트 화면에서 버튼을 숨겼더라도 Route Handler는 HTTP endpoint입니다. 요청은 직접
+호출될 수 있습니다. 세션, 권한, 입력 검증은 서버에서 다시 확인해야 합니다.
+
+### Proxy가 있으니 Route Handler 검증은 줄여도 된다
+
+Proxy는 빠른 사전 분기에 가깝습니다. 느린 조회나 복잡한 권한 판정은 적합하지 않습니다. Spring
+Security 필터 뒤에서도 Controller와 Service 검증이 남는 것처럼, Route Handler 내부의 검증은 그대로
+필요합니다.
+
+## 실무 체크리스트
+
+Route Handler를 만들기 전에 아래 다섯 가지를 먼저 정합니다.
+
+| 질문 | 선택 기준 |
+|---|---|
+| 이 경로는 화면인가 HTTP API인가 | 화면이면 `page.tsx`, API면 `route.ts`로 나눕니다 |
+| 외부 호출자가 있는가 | 있으면 상태 코드, 헤더, JSON 스키마를 계약으로 봅니다 |
+| 기존 Spring API가 이미 있는가 | 얇은 BFF인지, 책임 이전인지 먼저 결정합니다 |
+| 인증과 권한은 어디서 확정되는가 | Proxy가 아니라 Handler 또는 백엔드 서버에서 다시 확인합니다 |
+| GET 응답은 캐시 가능한가 | 공개 데이터와 사용자별 데이터를 분리합니다 |
+
+처음 Next.js를 배울 때는 `route.ts`를 Spring Controller처럼 크게 만들기 쉽습니다. 하지만 App Router의
+핵심은 파일 위치가 책임을 드러낸다는 점입니다. 화면 렌더링은 `page.tsx`, 같은 화면의 변경 흐름은
+Server Action, 명시적인 HTTP 계약은 Route Handler, 사전 요청 분기는 Proxy로 나누면 역할이 덜 섞입니다.
+
+## 연습 문제
+
+1. `/products` 화면은 `page.tsx`로 두고, `/api/products` JSON 목록은 `route.ts`로 분리해 보세요.
+2. `/api/products/[id]`에서 숫자가 아닌 `id`가 들어오면 `400`을 반환하도록 검증해 보세요.
+3. 상품 생성 POST에서 성공은 `201`, 입력 오류는 `400`, 권한 오류는 `403`으로 나누는 응답 타입을 설계해
+   보세요.
+4. 로그인 여부만 Proxy에서 확인하고, 실제 수정 권한은 Route Handler에서 다시 확인하도록 역할을 나눠
+   보세요.
+
+## 다음 학습
+
+다음 학습에서는 Next.js에서 인증과 권한 경계를 화면, Server Action, Route Handler, Proxy 사이에
+어떻게 배치할지 Spring Security의 필터 체인과 비교해 보겠습니다.
