@@ -62,12 +62,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: "트랜잭션 경계 심화",
+      name: "Next.js Route Handlers",
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: "운영 API 테스트 회고",
+      name: "Next.js 폼 처리",
     }),
   ).toBeVisible();
 });
