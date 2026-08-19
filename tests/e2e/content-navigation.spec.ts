@@ -27,8 +27,8 @@ test("홈은 대표 글과 매거진 편집 섹션을 표시한다", async ({ pa
   await expect(page.getByRole("heading", { name: "주간 편집 원칙" })).toBeVisible();
   await expect(page.getByText("Next.js", { exact: true })).toBeVisible();
   await expect(page.getByText("React Native")).toBeVisible();
-  await expect(page.getByText("Kotlin")).toBeVisible();
-  await expect(page.getByText("Flutter")).toBeVisible();
+  await expect(page.getByText("Kotlin", { exact: true })).toBeVisible();
+  await expect(page.getByText("Flutter", { exact: true })).toBeVisible();
 });
 
 test("홈은 관심 분야 링크 계약과 현재 학습 단계 표식을 유지한다", async ({ page }) => {
@@ -44,12 +44,12 @@ test("홈은 관심 분야 링크 계약과 현재 학습 단계 표식을 유�
   await expect(backendLink).toHaveAttribute("href", "/blog/categories/Backend/");
 
   const roadmap = page.getByRole("list", { name: "학습 순서" });
-  const currentStep = roadmap.getByRole("listitem").filter({ hasText: "Next.js" });
+  const currentStep = roadmap.getByRole("listitem").filter({ hasText: "Flutter" });
 
   await expect(currentStep).toHaveAttribute("aria-current", "step");
   await expect(currentStep.getByText("현재 단계")).toBeVisible();
 
-  for (const label of ["React Native", "Kotlin", "Flutter"]) {
+  for (const label of ["Next.js", "React Native", "Kotlin"]) {
     await expect(roadmap.getByRole("listitem").filter({ hasText: label })).not.toHaveAttribute(
       "aria-current",
       "step",
@@ -62,12 +62,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: "2026년 8월 셋째 주 IT 기술동향",
+      name: /Flutter 첫걸음/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: "Next.js Route Handlers",
+      name: /2026년 8월 셋째 주 IT 기술동향/,
     }),
   ).toBeVisible();
 });
