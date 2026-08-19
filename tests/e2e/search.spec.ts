@@ -5,15 +5,15 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(16);
+  expect(entries).toHaveLength(17);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "Spring Boot 개발자를 위한 Next.js Route Handlers: API 경계와 화면 경계 분리하기",
+    "2026년 8월 셋째 주 IT 기술동향: 에이전트 표준, 보안 패치와 테스트 자동화",
   );
   expect(entries[0].href).toBe(
-    "/blog/posts/nextjs-route-handlers-2026-08-18/",
+    "/blog/posts/weekly-it-trends-2026-08-19/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });
