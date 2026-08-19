@@ -44,15 +44,15 @@ const topics = topicDefinitions.map((topic) => ({
     topic.categoryName && availableCategories.has(topic.categoryName) ? topic.categoryName : undefined,
 }));
 const roadmap = [
-  { label: "Next.js", isCurrent: true },
-  { label: "React Native", isCurrent: false },
+  { label: "Flutter", isCurrent: true },
   { label: "Kotlin", isCurrent: false },
-  { label: "Flutter", isCurrent: false },
+  { label: "Next.js", isCurrent: false },
+  { label: "React Native", isCurrent: false },
 ];
 const editorialRhythm = [
-  { title: "첫 영업일", description: "순차 커리큘럼으로 학습 흐름을 이어갑니다." },
-  { title: "둘째 영업일", description: "그 주에 나온 기술 변화를 빠르게 따라갑니다." },
-  { title: "마지막 영업일", description: "한 주 동안 쓴 기술을 다시 깊게 파고듭니다." },
+  { title: "월요일 ~ 수요일", description: "Flutter 학습 글로 모바일 UI 기본기를 쌓습니다." },
+  { title: "목요일 ~ 토요일", description: "Kotlin 학습 글로 JVM과 모바일 언어 감각을 연결합니다." },
+  { title: "일요일", description: "한 주 동안 쓴 기술을 다시 깊게 파고듭니다." },
 ];
 ---
 
@@ -148,7 +148,7 @@ const editorialRhythm = [
         ))
       }
     </div>
-    <p class="editorial-note">공휴일을 제외한 영업일 기준으로 주간 발행 흐름을 유지합니다.</p>
+    <p class="editorial-note">쉬는 날에도 Asia/Seoul 달력일 기준으로 주간 발행 흐름을 유지합니다.</p>
   </section>
 
   <AdSlot placement="home" />
