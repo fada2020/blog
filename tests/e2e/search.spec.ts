@@ -10,7 +10,7 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "2026년 8월 셋째 주 IT 기술동향: 에이전트 표준, 보안 패치와 테스트 자동화",
+    "2026년 8월 셋째 주 IT 기술동향: 개발 도구 공급망과 데이터베이스 패치",
   );
   expect(entries[0].href).toBe(
     "/blog/posts/weekly-it-trends-2026-08-19/",
