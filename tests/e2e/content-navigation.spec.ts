@@ -44,12 +44,12 @@ test("홈은 관심 분야 링크 계약과 현재 학습 단계 표식을 유�
   await expect(backendLink).toHaveAttribute("href", "/blog/categories/Backend/");
 
   const roadmap = page.getByRole("list", { name: "학습 순서" });
-  const currentStep = roadmap.getByRole("listitem").filter({ hasText: "Flutter" });
+  const currentStep = roadmap.getByRole("listitem").filter({ hasText: "Kotlin" });
 
   await expect(currentStep).toHaveAttribute("aria-current", "step");
   await expect(currentStep.getByText("현재 단계")).toBeVisible();
 
-  for (const label of ["Next.js", "React Native", "Kotlin"]) {
+  for (const label of ["Next.js", "React Native", "Flutter"]) {
     await expect(roadmap.getByRole("listitem").filter({ hasText: label })).not.toHaveAttribute(
       "aria-current",
       "step",
@@ -62,12 +62,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /소프트 삭제 회고/,
+      name: /Kotlin 첫걸음/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Flutter 첫걸음/,
+      name: /소프트 삭제 회고/,
     }),
   ).toBeVisible();
 });
