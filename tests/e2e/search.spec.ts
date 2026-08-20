@@ -5,15 +5,15 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(18);
+  expect(entries).toHaveLength(19);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "Spring Boot 개발자를 위한 Flutter 첫걸음: Widget tree와 build 흐름 이해하기",
+    "소프트 삭제 회고: 전역 필터보다 조회 계약을 드러냅니다",
   );
   expect(entries[0].href).toBe(
-    "/blog/posts/flutter-widget-tree-first-step-2026-08-19/",
+    "/blog/posts/soft-delete-query-contract-retrospective-2026-08-20/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });
