@@ -5,15 +5,15 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(20);
+  expect(entries).toHaveLength(21);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "Spring Boot 개발자를 위한 Kotlin 첫걸음: top-level 함수와 클래스 감각 잡기",
+    "Kotlin 심화: top-level 선언이 JVM에서는 어떻게 보이는가",
   );
   expect(entries[0].href).toBe(
-    "/blog/posts/kotlin-top-level-first-step-2026-08-20/",
+    "/blog/posts/kotlin-file-facade-jvm-deep-dive-2026-08-21/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });
