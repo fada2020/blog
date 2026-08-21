@@ -62,12 +62,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /Kotlin 첫걸음/,
+      name: /Kotlin 심화/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /소프트 삭제 회고/,
+      name: /Kotlin 첫걸음/,
     }),
   ).toBeVisible();
 });
