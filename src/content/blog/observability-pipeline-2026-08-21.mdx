@@ -1,0 +1,388 @@
+---
+title: "Spring Boot 관측성 파이프라인: 로그·트레이스·에러를 한 요청으로 연결하기"
+description: "Grafana Alloy, Loki, OpenTelemetry Collector, Tempo, Sentry가 각각 무엇을 수집하고 어디에 저장하는지, trace_id로 장애 원인을 좁히는 흐름을 실전 설정과 함께 설명합니다."
+publishedAt: 2026-08-21T10:00:00+09:00
+draft: false
+category: "Backend"
+tags: ["Spring Boot", "Observability", "OpenTelemetry", "Grafana", "Sentry"]
+kind: "deep-dive"
+heroImage: "../../assets/blog/observability-pipeline-2026-08-21/cover.webp"
+heroImageAlt: "애플리케이션 텔레메트리가 수집기를 거쳐 로그, 트레이스, 에러 저장소와 대시보드로 전달되는 관측성 파이프라인"
+imageCredit:
+  label: "AI 생성 이미지"
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+애플리케이션에서 HTTP 500이 발생했다는 사실만으로는 원인을 고칠 수 없습니다. 어느 요청이 실패했는지,
+그 요청이 어떤 메서드와 외부 시스템을 거쳤는지, 실패 직전에 무슨 로그가 있었는지까지 연결해야 합니다.
+
+이때 자주 함께 등장하는 도구가 Grafana Alloy, Loki, OpenTelemetry Collector, Tempo, Sentry입니다. 이름만
+나열하면 모두 비슷한 모니터링 도구처럼 보이지만, 실제 책임은 다릅니다. 수집기와 저장소를 구분하지 않으면
+같은 데이터를 중복 저장하거나, 정작 장애 시점에 필요한 연결 고리를 잃습니다.
+
+이 글에서는 Spring Boot 애플리케이션과 Docker 환경을 기준으로 다음 질문에 답합니다.
+
+1. 로그, 트레이스, 에러는 무엇이 다른가
+2. Alloy와 OpenTelemetry Collector를 왜 둘 다 사용하는가
+3. 각 데이터가 어떤 경로로 전송되고 어디에 저장되는가
+4. `trace_id` 하나로 로그와 트레이스를 어떻게 연결하는가
+5. 개발 환경 구성을 운영 환경으로 옮길 때 무엇을 바꿔야 하는가
+
+## 먼저 신호의 목적을 나눕니다
+
+관측성 데이터는 보통 로그, 메트릭, 트레이스로 구분합니다. 여기에 예외 추적 도구가 애플리케이션 오류를
+개발 작업 단위로 묶어 줍니다.
+
+| 신호 | 답하려는 질문 | 대표 저장소·도구 |
+|---|---|---|
+| 로그 | 그 시점에 애플리케이션이 무슨 말을 남겼는가 | Loki |
+| 트레이스 | 하나의 요청이 어디를 거쳤고 어디서 느려졌는가 | Tempo |
+| 메트릭 | 오류율, 처리량, 지연 시간이 시간에 따라 어떻게 변했는가 | Prometheus 계열 |
+| 에러 이슈 | 어떤 예외가 반복되며 어느 릴리즈와 사용자 범위에 영향을 주는가 | Sentry |
+
+로그는 사건의 상세 문장에 강하고, 트레이스는 호출 관계와 소요 시간에 강합니다. 메트릭은 전체 추세와
+알림 기준에 강합니다. Sentry는 예외 스택과 반복 발생을 하나의 이슈로 묶어 개발자가 처리할 작업으로
+바꾸는 데 강합니다.
+
+따라서 “Sentry가 있으니 Loki는 필요 없다”거나 “로그가 있으니 트레이스는 필요 없다”는 식으로 대체할 수
+없습니다. 같은 장애를 서로 다른 각도에서 보는 도구입니다.
+
+## 전체 데이터 흐름
+
+소형 Docker 환경에서는 다음과 같이 역할을 나눌 수 있습니다.
+
+<Mermaid title="Spring Boot 관측성 데이터 흐름">
+{`flowchart LR
+  App["Spring Boot 애플리케이션"]
+  Stdout["컨테이너 stdout/stderr"]
+  Alloy["Grafana Alloy"]
+  Loki["Loki 로그 저장소"]
+  OTel["OpenTelemetry Collector"]
+  Tempo["Tempo 트레이스 저장소"]
+  Sentry["Sentry 에러 이슈"]
+  Grafana["Grafana 조회 화면"]
+
+  App -->|"구조화 로그"| Stdout
+  Stdout -->|"Docker 로그 수집"| Alloy
+  Alloy -->|"Loki Push API"| Loki
+
+  App -->|"OTLP HTTP 또는 gRPC"| OTel
+  OTel -->|"batch 후 OTLP"| Tempo
+
+  App -->|"예외·릴리즈·컨텍스트"| Sentry
+
+  Loki --> Grafana
+  Tempo --> Grafana
+`}
+</Mermaid>
+
+여기서 Alloy와 OpenTelemetry Collector는 저장소가 아닙니다. 데이터를 받아 분류하고 다음 시스템으로
+전달하는 수집 계층입니다. Loki와 Tempo는 조회를 위해 데이터를 보관하는 백엔드입니다. Sentry SaaS를
+사용한다면 예외 데이터는 Sentry가 관리하는 원격 저장소로 전달됩니다.
+
+## 로그 경로: stdout에서 Loki까지
+
+컨테이너 환경에서는 애플리케이션이 로그 파일을 직접 관리하기보다 stdout과 stderr로 출력하는 구성이
+단순합니다. Docker가 컨테이너 로그를 관리하고, Alloy가 Docker 소켓을 통해 실행 중인 컨테이너와 로그
+스트림을 발견합니다.
+
+```text
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+
+  rule {
+    target_label = "environment"
+    replacement  = "dev"
+  }
+}
+
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+```
+
+Alloy는 로그 내용 전체를 라벨로 만들지 않습니다. `service`, `container`, `environment`, `stream`처럼
+값의 종류가 제한된 필드만 라벨로 두는 편이 좋습니다. 사용자 ID, 요청 ID, URL 전체처럼 값이 계속
+늘어나는 필드를 라벨로 만들면 Loki의 label cardinality가 커집니다. 이런 값은 로그 본문에 남기고 검색
+단계에서 파싱합니다.
+
+Loki는 로그 라인을 chunk와 index로 나누어 저장합니다. 개발 환경에서는 filesystem 백엔드와 Docker
+named volume만으로도 충분합니다.
+
+```yaml
+common:
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+
+schema_config:
+  configs:
+    - from: 2024-04-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  retention_period: 168h
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
+```
+
+`168h`는 7일 보관을 뜻합니다. Loki의 retention은 단순히 날짜가 지났다고 파일이 즉시 사라지는 방식이
+아닙니다. Compactor가 인덱스를 정리하고 해당 chunk를 삭제합니다. filesystem 저장은 디스크 여유 공간을
+기준으로 자동 삭제하지 않으므로, retention과 별개로 볼륨 사용량을 감시해야 합니다.
+
+## 트레이스 경로: OTLP에서 Tempo까지
+
+트레이스는 하나의 요청을 여러 span으로 나눕니다. HTTP 요청 처리, 서비스 메서드, SQL, Redis, 외부 HTTP
+호출이 각각 span이 될 수 있습니다. 모든 span이 같은 `trace_id`를 공유하고 부모·자식 관계를 가지면
+요청의 전체 흐름을 복원할 수 있습니다.
+
+Spring Boot 컨테이너에는 다음과 같은 OpenTelemetry 설정을 전달할 수 있습니다.
+
+```yaml
+environment:
+  OTEL_SERVICE_NAME: sample-api
+  OTEL_RESOURCE_ATTRIBUTES: deployment.environment=dev
+  OTEL_TRACES_EXPORTER: otlp
+  OTEL_METRICS_EXPORTER: none
+  OTEL_LOGS_EXPORTER: none
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  OTEL_TRACES_SAMPLER: parentbased_traceidratio
+  OTEL_TRACES_SAMPLER_ARG: "1.0"
+```
+
+이 구성은 트레이스만 OTLP로 보냅니다. 로그는 Alloy가 별도 수집하므로 `OTEL_LOGS_EXPORTER=none`이고,
+메트릭도 이 파이프라인에서는 보내지 않으므로 `OTEL_METRICS_EXPORTER=none`입니다. “OpenTelemetry를
+설치했다”는 사실만으로 로그·메트릭·트레이스가 모두 전송되는 것은 아닙니다. 활성화된 pipeline을 확인해야
+합니다.
+
+Collector는 OTLP HTTP 4318과 OTLP gRPC 4317을 받고, batch processor를 거쳐 Tempo로 전달합니다.
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/tempo]
+```
+
+Collector를 중간에 두는 이유는 애플리케이션이 Tempo의 세부 설정을 알지 않게 하기 위해서입니다. 저장소를
+교체하거나 exporter를 하나 더 붙여도 애플리케이션은 계속 OTLP만 전송할 수 있습니다. 또한 batching,
+retry, 필터링, 민감정보 제거 같은 정책을 애플리케이션 밖에서 적용할 수 있습니다.
+
+개발 환경의 Tempo는 로컬 디스크를 사용할 수 있습니다.
+
+```yaml
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/traces
+    wal:
+      path: /var/tempo/wal
+```
+
+Docker Compose에서는 `/var/tempo`를 named volume에 연결해야 컨테이너 재생성 후에도 데이터가 유지됩니다.
+다만 단일 호스트의 Docker 볼륨은 호스트 디스크 장애까지 보호하지 않습니다. Tempo 공식 문서도 local
+filesystem을 개발·테스트 용도로 설명하고, 운영 장기 보관에는 S3, GCS, Azure Blob 같은 object storage를
+권장합니다.
+
+## 에러 경로: Sentry가 별도로 필요한 이유
+
+트레이스에서 실패 span을 찾을 수 있고 로그에도 stack trace가 있는데 Sentry를 왜 추가할까요? 운영자가
+원인을 탐색하는 방식과 개발자가 오류를 처리하는 방식이 다르기 때문입니다.
+
+Sentry는 예외를 stack trace와 fingerprint를 기준으로 그룹화하고, 발생 횟수, 최초·최근 발생 시각,
+release, environment 같은 정보를 하나의 이슈로 제공합니다. 한 번 발생한 예외와 수천 번 반복되는 회귀를
+구분하기 쉽습니다.
+
+Spring Boot에서는 DSN과 release를 환경변수로 분리합니다.
+
+```yaml
+sentry:
+  dsn: ${SENTRY_DSN:}
+  environment: ${SENTRY_ENVIRONMENT:dev}
+  release: ${SENTRY_RELEASE:}
+  traces-sample-rate: ${SENTRY_TRACES_SAMPLE_RATE:0.2}
+```
+
+DSN이 비어 있으면 SDK가 의존성에 포함돼 있어도 전송되지 않습니다. `release`에는 배포 commit SHA나
+이미지 태그처럼 실제 배포물과 일치하는 값을 넣어야 어느 변경 이후 오류가 증가했는지 비교할 수 있습니다.
+
+Sentry에도 tracing 기능이 있지만 Tempo와 목적이 겹치는 범위를 명확히 해야 합니다. 모든 trace를 두
+곳에 똑같이 장기 보관하면 비용과 운영 복잡도가 늘어납니다. 예외 중심 조사와 릴리즈 회귀는 Sentry,
+서비스 전체 호출 흐름과 Grafana 연계는 Tempo처럼 조회 책임을 정하고 sampling 정책도 별도로 관리하는 것이
+낫습니다.
+
+## 핵심 연결점은 trace_id입니다
+
+로그와 트레이스를 따로 수집해도 같은 요청인지 알 수 없다면 활용도가 크게 떨어집니다. 애플리케이션 로그
+패턴에 MDC의 trace ID와 span ID를 포함합니다.
+
+```xml
+<property name="CONSOLE_LOG_PATTERN"
+  value="%d{ISO8601} %5p [%thread] %logger : [trace_id=%X{trace_id:-} span_id=%X{span_id:-}] %m%n" />
+```
+
+출력은 다음과 같은 형태가 됩니다.
+
+```text
+2026-08-21T10:15:20.132Z ERROR [http-nio-8080-exec-4]
+[trace_id=4fd7c12a... span_id=91bc032e...] PaymentService : external request failed
+```
+
+이제 조사 순서를 연결할 수 있습니다.
+
+1. Sentry에서 예외와 발생 release를 확인합니다.
+2. 오류 시각과 trace ID를 확인합니다.
+3. Grafana Loki에서 같은 `trace_id`가 포함된 로그를 검색합니다.
+4. Tempo에서 trace ID를 열어 느린 span과 실패한 호출을 확인합니다.
+5. 같은 서비스의 전후 로그로 입력값이 아니라 상태 변화와 외부 응답을 검증합니다.
+
+Grafana의 trace-to-logs 기능을 설정하면 Tempo span에서 관련 Loki 로그로 바로 이동할 수 있습니다. 반대로
+Loki 로그에서 trace ID를 추출해 Tempo trace 링크를 만들 수도 있습니다. 이 기능이 동작하려면 두 데이터
+소스가 모두 설정되어야 하고, 애플리케이션 로그와 trace가 동일한 ID를 공유해야 합니다.
+
+## 자주 생기는 구성 오류
+
+### 수집기와 저장소를 같은 것으로 생각합니다
+
+Alloy와 OTel Collector는 기본적으로 장기 저장소가 아닙니다. 전달이 중단되었을 때 메모리 큐만 믿으면
+프로세스 재시작 시 데이터가 사라질 수 있습니다. 필요한 경우 Collector의 persistent queue와 재시도 정책을
+별도로 설계해야 합니다.
+
+### latest 이미지 태그를 운영에서 사용합니다
+
+관측 도구는 설정 문법과 기본 동작이 버전에 따라 달라질 수 있습니다. `latest`는 재배포만 했는데 동작이
+바뀌는 원인이 됩니다. 운영 Compose에서는 검증한 버전이나 digest를 고정해야 합니다.
+
+### 모든 로그를 무기한 저장합니다
+
+보관 기간은 길수록 좋은 것이 아닙니다. 디버그 로그, 요청 본문, 사용자 식별정보가 장기간 남으면 비용과
+보안 위험이 함께 커집니다. 개발 로그 7일, 운영 오류 로그 30일처럼 환경과 stream에 따라 retention을
+분리하고, 민감정보는 수집 전에 제거해야 합니다.
+
+### trace sampling을 무조건 100%로 둡니다
+
+개발 환경에서는 `1.0`이 이해하기 쉽지만 운영 트래픽에서는 저장량이 빠르게 증가합니다. 오류와 느린 요청은
+보존하면서 정상 요청은 비율 기반으로 줄이는 tail sampling을 Collector에서 검토할 수 있습니다. 단순히
+애플리케이션에서 먼저 버리면 결과를 본 뒤 샘플링할 수 없습니다.
+
+### 로그 본문을 라벨로 복제합니다
+
+Loki 라벨에는 낮은 cardinality 값만 둡니다. 사용자 ID, request ID, trace ID는 검색에 유용하지만 값이
+거의 매번 달라지므로 기본 라벨로 적합하지 않습니다. 구조화 로그 필드로 남기고 query 단계에서 추출합니다.
+
+## 개발 환경과 운영 환경의 차이
+
+| 항목 | 개발 환경 | 운영 환경 |
+|---|---|---|
+| Loki 저장소 | 단일 Docker volume | S3 등 object storage 검토 |
+| Tempo 저장소 | local filesystem | object storage 권장 |
+| trace sampling | 100%도 가능 | 트래픽·비용 기준으로 제한 |
+| 이미지 버전 | 실험 중 변경 가능 | 버전 또는 digest 고정 |
+| 보관 기간 | 짧게, 재현 중심 | 규정·비용·조사 기간 기준 |
+| 고가용성 | 단일 인스턴스 허용 | 수집·저장 경로 장애 대비 |
+| 민감정보 | 테스트 데이터만 허용 | 수집 전 마스킹과 접근 통제 필수 |
+
+단일 Mac이나 개발 서버의 Docker volume은 학습과 장애 재현에는 충분합니다. 하지만 백업은 아닙니다. 호스트
+디스크가 손상되면 Loki와 Tempo 데이터도 함께 사라집니다. 운영 전환 시에는 저장소뿐 아니라 retention,
+백업, 접근 권한, 암호화, 수집 실패 알림을 하나의 정책으로 봐야 합니다.
+
+## 최소 검증 체크리스트
+
+구성을 띄운 뒤 화면이 열린다는 사실만 확인해서는 부족합니다. 신호별로 실제 왕복을 검증합니다.
+
+1. 테스트 API를 한 번 호출하고 응답의 request ID를 기록합니다.
+2. 애플리케이션 로그에 `trace_id`, `span_id`가 포함되는지 확인합니다.
+3. Loki에서 서비스 라벨과 해당 trace ID로 로그가 조회되는지 확인합니다.
+4. Tempo에서 같은 trace가 조회되고 HTTP·서비스·DB span 순서가 보이는지 확인합니다.
+5. 의도적인 테스트 예외가 Sentry의 올바른 environment와 release에 들어오는지 확인합니다.
+6. 컨테이너만 재생성한 뒤 Loki와 Tempo 데이터가 유지되는지 확인합니다.
+7. retention 기간을 넘긴 테스트 데이터가 실제로 삭제되는지 확인합니다.
+8. 토큰, 비밀번호, 요청 본문 같은 민감정보가 세 저장 경로에 남지 않는지 확인합니다.
+
+이 검증을 자동화하면 “컨테이너는 실행 중인데 데이터는 들어오지 않는” 상태를 배포 직후 발견할 수 있습니다.
+
+## 정리하면
+
+관측성 스택의 핵심은 도구 개수가 아니라 데이터 책임을 분리하고 다시 연결하는 것입니다.
+
+- Alloy는 Docker 로그를 발견하고 Loki로 보냅니다.
+- Loki는 로그를 저장하고 시간·라벨·본문으로 검색합니다.
+- Spring Boot instrumentation은 trace를 OTLP로 보냅니다.
+- OpenTelemetry Collector는 trace를 받아 batch 처리하고 Tempo로 전달합니다.
+- Tempo는 요청의 span 관계와 지연 시간을 저장하고 조회합니다.
+- Sentry는 예외를 이슈와 release 단위로 묶어 개발자가 처리할 수 있게 합니다.
+- Grafana는 Loki와 Tempo를 조회하고 `trace_id`로 두 신호를 연결합니다.
+
+처음에는 단일 Docker Compose와 로컬 volume으로 충분합니다. 다만 운영으로 옮길 때는 저장소를 object
+storage로 바꾸는 것만으로 끝나지 않습니다. sampling, retention, 민감정보, 버전 고정, 수집 실패 감시까지
+함께 설계해야 관측 시스템 자체가 새로운 장애 원인이 되지 않습니다.
+
+## 참고자료
+
+- [OpenTelemetry Collector 공식 문서](https://opentelemetry.io/docs/collector/) -
+  telemetry 수신, 처리, 전송과 Collector 도입 목적
+- [OpenTelemetry Collector Components](https://opentelemetry.io/docs/collector/components/) -
+  receiver, processor, exporter 구성 기준
+- [Grafana Alloy Docker 모니터링](https://grafana.com/docs/alloy/latest/monitor/monitor-docker-containers/) -
+  Docker 로그와 메트릭 수집 흐름
+- [Grafana Loki Storage](https://grafana.com/docs/loki/latest/configure/storage/) -
+  TSDB, filesystem, object storage와 retention 기준
+- [Grafana Loki Log Retention](https://grafana.com/docs/loki/latest/operations/storage/retention/) -
+  Compactor 기반 보관 기간 처리
+- [Grafana Tempo Architecture](https://grafana.com/docs/tempo/latest/introduction/architecture/) -
+  trace 수집, 저장, 조회 경로와 운영 저장소
+- [Grafana Tempo Object Storage](https://grafana.com/docs/tempo/latest/reference-tempo-architecture/object-storage/) -
+  S3, GCS, Azure Blob 및 개발용 local backend
+- [Grafana Trace to Logs](https://grafana.com/docs/grafana/latest/datasources/tempo/configure-tempo-data-source/configure-trace-to-logs/) -
+  Loki 로그와 Tempo trace 상호 연결 조건
+- [Sentry Spring Boot 공식 문서](https://docs.sentry.io/platforms/java/guides/spring-boot/) -
+  Spring Boot 예외와 성능 데이터 연동 기준

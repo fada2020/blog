@@ -5,15 +5,15 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(21);
+  expect(entries).toHaveLength(22);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "Kotlin 심화: top-level 선언이 JVM에서는 어떻게 보이는가",
+    "Spring Boot 관측성 파이프라인: 로그·트레이스·에러를 한 요청으로 연결하기",
   );
   expect(entries[0].href).toBe(
-    "/blog/posts/kotlin-file-facade-jvm-deep-dive-2026-08-21/",
+    "/blog/posts/observability-pipeline-2026-08-21/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });
