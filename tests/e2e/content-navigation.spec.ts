@@ -62,12 +62,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /React Native 첫걸음/,
+      name: /Flutter 둘째 걸음/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Spring Boot 관측성 파이프라인/,
+      name: /React Native 첫걸음/,
     }),
   ).toBeVisible();
 });
