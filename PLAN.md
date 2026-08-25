@@ -111,7 +111,8 @@ Asia/Seoul 달력일을 기준으로 편성한다.
 
 매주 다음 영역을 먼저 스캔한다.
 
-- AI와 개발 워크플로우: 모델, 에이전트, IDE, 코드 리뷰, 테스트 자동화, 온디바이스 AI
+- AI와 개발 워크플로우: OpenAI, Anthropic, Google, xAI/Grok, Meta, Mistral 등 주요 frontier 모델,
+  에이전트 제품, IDE, 코드 리뷰, 테스트 자동화, 온디바이스 AI
 - 언어와 런타임: Java, Kotlin, JavaScript, TypeScript, Python, Go, Rust, Swift, JVM, Node.js, Deno, Bun
 - 프레임워크와 플랫폼: Spring, React, Next.js, Vue, Svelte, React Native, Flutter, Android, iOS, Django, Rails
 - 클라우드와 인프라: AWS, GCP, Azure, Docker, Kubernetes, Terraform, CI/CD, 서버리스
@@ -125,6 +126,11 @@ Asia/Seoul 달력일을 기준으로 편성한다.
 3. Java/Spring Boot 개발자가 3개월 안에 알아야 할 실무 영향이 있는가
 4. 기존 블로그의 최근 글과 생태계가 겹치지 않는가
 5. 단순 버전 업데이트보다 방향 변화, 호환성 변화, 도입 판단 근거를 설명할 수 있는가
+
+AI 모델과 에이전트 제품은 단순 출시 공지뿐 아니라 공식 배포 채널 확대, 요금제 변경,
+공식 API 제공 상태, 독립 벤치마크와 실무 비교 논쟁까지 함께 본다. Grok처럼 업계 화제가
+큰 제품은 최초 출시일만 보지 말고 최근 7일 안의 공식 후속 발표와 비교 근거가 있는지
+반드시 확인한다.
 
 현재 사용하는 기술은 독자의 이해를 돕는 비교 기준으로 사용하되, 주제 선정 범위를
 Kotlin, Java, Spring Boot, Next.js, AWS 등으로 제한하지 않는다.
