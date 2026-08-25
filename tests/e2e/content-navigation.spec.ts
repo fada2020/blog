@@ -5,19 +5,19 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /2026년 8월 넷째 주 IT 기술동향/ })
+    .getByRole("link", { name: /Flutter 셋째 걸음/ })
     .click();
 
-  await expect(page).toHaveURL(/\/blog\/posts\/weekly-it-trends-2026-08-25\/$/);
+  await expect(page).toHaveURL(/\/blog\/posts\/flutter-async-data-2026-08-25\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "2026년 8월 넷째 주 IT 기술동향: AI 개발 도구 GA, EKS 인증서 회전과 EOL 대응",
+    "Spring Boot 개발자를 위한 Flutter 셋째 걸음: FutureBuilder로 서버 데이터 다루기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "AI 개발 도구, 쿠버네티스 인증서 회전, 컨테이너 EOL 패치, IDE 릴리스 노트를 한 운영 대시보드에서 점검하는 기술 동향 이미지",
+    "Flutter 앱이 Future와 FutureBuilder를 통해 HTTP 응답을 loading, error, data 상태로 나누어 화면에 표시하는 기술 다이어그램",
   );
 });
 
@@ -65,12 +65,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /2026년 8월 넷째 주 IT 기술동향/,
+      name: /Flutter 셋째 걸음/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Flutter 둘째 걸음/,
+      name: /2026년 8월 넷째 주 IT 기술동향/,
     }),
   ).toBeVisible();
 });
