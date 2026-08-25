@@ -112,7 +112,8 @@ Asia/Seoul 달력일을 기준으로 편성한다.
 매주 다음 영역을 먼저 스캔한다.
 
 - AI와 개발 워크플로우: OpenAI, Anthropic, Google, xAI/Grok, Meta, Mistral 등 주요 frontier 모델,
-  에이전트 제품, IDE, 코드 리뷰, 테스트 자동화, 온디바이스 AI
+  AI agent 제품, IDE, 코드 리뷰, 테스트 자동화, 온디바이스 AI, harness engineering,
+  loop engineering, context engineering, agent evaluation
 - 언어와 런타임: Java, Kotlin, JavaScript, TypeScript, Python, Go, Rust, Swift, JVM, Node.js, Deno, Bun
 - 프레임워크와 플랫폼: Spring, React, Next.js, Vue, Svelte, React Native, Flutter, Android, iOS, Django, Rails
 - 클라우드와 인프라: AWS, GCP, Azure, Docker, Kubernetes, Terraform, CI/CD, 서버리스
@@ -131,6 +132,21 @@ AI 모델과 에이전트 제품은 단순 출시 공지뿐 아니라 공식 배
 공식 API 제공 상태, 독립 벤치마크와 실무 비교 논쟁까지 함께 본다. Grok처럼 업계 화제가
 큰 제품은 최초 출시일만 보지 말고 최근 7일 안의 공식 후속 발표와 비교 근거가 있는지
 반드시 확인한다.
+
+AI agent 주제는 사용자의 주요 관심사로 우선순위를 높게 둔다. 단순히 새 모델이 나왔다는
+소식보다 다음 질문에 답할 수 있는 발표와 자료를 우선한다.
+
+- 어떤 agent와 모델이 현재 코딩, 리서치, 문서화, 브라우저 작업, 장기 실행 작업에서 좋은가
+- 가격, 속도, context window, tool use, 안정성, 승인 흐름까지 포함하면 어떤 선택이 가성비가 좋은가
+- 실제 개발자와 최전선 팀은 Claude Code, Codex, Cursor, GitHub Copilot, Grok Bot, Gemini CLI,
+  Devin류 제품을 어떤 workflow로 쓰는가
+- harness engineering, loop engineering, context engineering, eval, memory, tool routing, approval,
+  sandboxing, rollback 같은 agent 운용 기법 중 무엇이 빠르게 확산되고 있는가
+- Java/Spring Boot 팀이 따라 해 볼 수 있는 최소 실험, 측정 기준, 실패 방지 장치는 무엇인가
+
+이 축은 공식 발표만 요약하지 않는다. 공식 문서와 릴리스 노트를 기준으로 하되, 독립 벤치마크,
+공개 사용 사례, 개발자 커뮤니티의 반복 사례를 함께 확인해 "무엇이 더 좋고 왜 그런지"를 비교한다.
+다만 루머, 단일 후기, 출처 없는 순위표는 근거로 쓰지 않는다.
 
 위 목록은 고정된 전체 목록이 아니라 최소 확인 대상이다. 매주 기술동향을 고를 때는 다음 절차로
 새 후보를 먼저 추가한다.
