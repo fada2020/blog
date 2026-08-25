@@ -44,7 +44,7 @@ Asia/Seoul 달력일을 기준으로 편성한다.
 |---|---|
 | 첫 번째(월요일) | Flutter 학습 |
 | 두 번째(화요일) | Flutter 학습 |
-| 세 번째(수요일) | Flutter 학습 |
+| 세 번째(수요일) | Flutter 학습 + AI agent 비교와 실전 엔지니어링 |
 | 네 번째(목요일) | Kotlin 학습 |
 | 다섯 번째(금요일) | Kotlin 학습 |
 | 여섯 번째(토요일) | Kotlin 학습 |
@@ -52,6 +52,7 @@ Asia/Seoul 달력일을 기준으로 편성한다.
 
 - 승인된 글이 없으면 해당 날짜에는 발행하지 않는다.
 - 같은 날짜에 독립적인 편성 축이 겹치면 각각 별도 글로 처리한다.
+- 수요일에는 Flutter 학습과 별개로 AI agent 비교와 실전 엔지니어링 글을 정기 편성한다.
 - 쉬는 날에 발행하지 못한 글을 다음 날 몰아서 발행하지 않는다.
 - 발행하지 않은 후보는 대기열 순서를 유지한다.
 
@@ -111,7 +112,9 @@ Asia/Seoul 달력일을 기준으로 편성한다.
 
 매주 다음 영역을 먼저 스캔한다.
 
-- AI와 개발 워크플로우: 모델, 에이전트, IDE, 코드 리뷰, 테스트 자동화, 온디바이스 AI
+- AI와 개발 워크플로우: OpenAI, Anthropic, Google, xAI/Grok, Meta, Mistral 등 주요 frontier 모델,
+  AI agent 제품, IDE, 코드 리뷰, 테스트 자동화, 온디바이스 AI, harness engineering,
+  loop engineering, context engineering, agent evaluation
 - 언어와 런타임: Java, Kotlin, JavaScript, TypeScript, Python, Go, Rust, Swift, JVM, Node.js, Deno, Bun
 - 프레임워크와 플랫폼: Spring, React, Next.js, Vue, Svelte, React Native, Flutter, Android, iOS, Django, Rails
 - 클라우드와 인프라: AWS, GCP, Azure, Docker, Kubernetes, Terraform, CI/CD, 서버리스
@@ -125,6 +128,38 @@ Asia/Seoul 달력일을 기준으로 편성한다.
 3. Java/Spring Boot 개발자가 3개월 안에 알아야 할 실무 영향이 있는가
 4. 기존 블로그의 최근 글과 생태계가 겹치지 않는가
 5. 단순 버전 업데이트보다 방향 변화, 호환성 변화, 도입 판단 근거를 설명할 수 있는가
+
+AI 모델과 에이전트 제품은 단순 출시 공지뿐 아니라 공식 배포 채널 확대, 요금제 변경,
+공식 API 제공 상태, 독립 벤치마크와 실무 비교 논쟁까지 함께 본다. Grok처럼 업계 화제가
+큰 제품은 최초 출시일만 보지 말고 최근 7일 안의 공식 후속 발표와 비교 근거가 있는지
+반드시 확인한다.
+
+AI agent 주제는 사용자의 주요 관심사로 우선순위를 높게 둔다. 단순히 새 모델이 나왔다는
+소식보다 다음 질문에 답할 수 있는 발표와 자료를 우선한다.
+
+- 어떤 agent와 모델이 현재 코딩, 리서치, 문서화, 브라우저 작업, 장기 실행 작업에서 좋은가
+- 가격, 속도, context window, tool use, 안정성, 승인 흐름까지 포함하면 어떤 선택이 가성비가 좋은가
+- 실제 개발자와 최전선 팀은 Claude Code, Codex, Cursor, GitHub Copilot, Grok Bot, Gemini CLI,
+  Devin류 제품을 어떤 workflow로 쓰는가
+- harness engineering, loop engineering, context engineering, eval, memory, tool routing, approval,
+  sandboxing, rollback 같은 agent 운용 기법 중 무엇이 빠르게 확산되고 있는가
+- Java/Spring Boot 팀이 따라 해 볼 수 있는 최소 실험, 측정 기준, 실패 방지 장치는 무엇인가
+
+이 축은 공식 발표만 요약하지 않는다. 공식 문서와 릴리스 노트를 기준으로 하되, 독립 벤치마크,
+공개 사용 사례, 개발자 커뮤니티의 반복 사례를 함께 확인해 "무엇이 더 좋고 왜 그런지"를 비교한다.
+다만 루머, 단일 후기, 출처 없는 순위표는 근거로 쓰지 않는다.
+이 주제는 수요일 정기 편성으로 다루며, 그 주에 큰 공식 발표가 없더라도 최신 벤치마크,
+가격, 채택 흐름, 최전선 workflow와 engineering pattern을 비교할 근거가 있으면 작성한다.
+
+위 목록은 고정된 전체 목록이 아니라 최소 확인 대상이다. 매주 기술동향을 고를 때는 다음 절차로
+새 후보를 먼저 추가한다.
+
+1. 공식 발표 채널, 주요 클라우드 model catalog, IDE/agent 플랫폼 공지, 독립 벤치마크 사이트에서
+   새 모델, 새 에이전트 제품, 배포 채널 확대, 가격 변경을 찾는다.
+2. 최근 2주 안에 여러 공식 채널 또는 신뢰 가능한 벤치마크에서 반복적으로 등장한 제품은 다음 주
+   최소 확인 대상에 임시로 포함한다.
+3. 새 후보가 기존 목록에 없더라도 공식 발표와 실무 영향이 확인되면 기존 벤더보다 우선할 수 있다.
+4. 본문에 넣지 않은 화제성 후보는 왜 제외했는지 후보 검토 메모나 PR 본문에 짧게 남긴다.
 
 현재 사용하는 기술은 독자의 이해를 돕는 비교 기준으로 사용하되, 주제 선정 범위를
 Kotlin, Java, Spring Boot, Next.js, AWS 등으로 제한하지 않는다.
