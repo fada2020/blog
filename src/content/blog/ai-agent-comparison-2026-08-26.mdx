@@ -1,0 +1,268 @@
+---
+title: "AI agent 비교: Grok 4.6, Codex, Claude Code, Cursor를 어떻게 고를까"
+description: "Grok 4.6과 주요 AI coding agent를 가격, 성능, workflow, harness engineering, loop engineering, eval 기준으로 비교하고 Spring Boot 팀이 따라 해 볼 운영 방식을 정리합니다."
+publishedAt: 2026-08-26T10:01:00+09:00
+draft: false
+category: "Tooling"
+tags: ["AI Agent", "Grok", "Codex", "Claude Code", "Developer Tools"]
+kind: "trend"
+heroImage: "../../assets/blog/ai-agent-comparison-2026-08-26/cover.webp"
+heroImageAlt: "여러 AI coding agent를 성능, 비용, 승인, 평가, 롤백 기준으로 비교하는 엔지니어링 대시보드"
+imageCredit:
+  label: "AI 생성 이미지"
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 범위**
+>
+> 2026년 8월 26일에 xAI Grok 4.6 공식 문서와 가격표, OpenAI Codex 가격 문서,
+> GitHub Copilot 공식 가격과 플랜 문서, Cursor 공식 가격과 모델 문서, Google Cloud Gemini
+> Code Assist quota 문서, Terminal-Bench 2.1 leaderboard, Artificial Analysis 방법론 설명을
+> 확인했습니다. Grok 4.6은 공식 문서에 표시된 현재 모델과 가격을 기준으로 다뤘습니다. preview,
+> beta, 연구 미리보기 기능은 안정 기능처럼 비교하지 않았습니다.
+
+## 결론부터 말하면
+
+현재 AI agent 선택은 "어떤 모델이 제일 똑똑한가"보다 **내 작업을 끝까지 돌릴 수 있는 harness,
+비용 한도, 승인 흐름, rollback 습관이 있는가**로 갈립니다.
+
+Grok 4.6은 xAI 공식 문서 기준 coding, agentic task, knowledge work를 겨냥한 frontier model이고,
+500k context, Responses API, Chat Completions, function calling, web search, X search, code
+execution을 제공합니다. 가격도 short context 기준 입력 100만 token당 $2, 출력 100만 token당 $6로
+명확합니다. Cursor 공식 가격표에도 Grok과 Grok Bot 사용 한도가 별도 혜택으로 들어가 있으므로,
+Grok은 이제 "화제성 모델"이 아니라 agent 제품 선택지 안에 들어온 모델로 봐야 합니다.
+
+다만 Spring Boot 팀이 바로 따라 할 결론은 하나입니다. 한 agent만 믿고 전체 개발 흐름을 맡기기보다,
+작업 유형별로 agent를 나누고, 같은 harness 안에서 plan, code, test, review, rollback loop를 반복하게
+만드는 편이 더 안전합니다.
+
+## 이번 주 비교 대상
+
+| 도구 | 강점 | 비용/한도 관점 | 먼저 써 볼 작업 |
+|---|---|---|---|
+| Grok 4.6 API | 긴 context, tool use, 검색 결합, 코딩·지식 작업 | short context $2 input / $6 output, 200k 이상은 long context 가격 | 큰 로그, 긴 설계 문서, 외부 검색이 붙은 조사 |
+| Cursor | editor 안 agent, Grok Bot, Cloud Agents, Bugbot | Individual Pro $20/mo부터, 상위 플랜은 agent와 Grok Bot 한도 증가 | 일상 구현, 파일 여러 개 수정, IDE 중심 작업 |
+| Codex | CLI, web, IDE, cloud task, 자동 리뷰와 팀 사용량 관리 | ChatGPT 플랜 포함, 팀은 seat/credit 또는 pay-as-you-go 정책 | 저장소 단위 변경, 테스트 실행, 자동화 반복 작업 |
+| Claude Code | 긴 자율 coding session, 대화형 refactor와 설명 | Claude 플랜의 usage limit 안에서 사용 | 복잡한 리팩터링, 긴 코드 읽기, 설계 검토 |
+| GitHub Copilot | GitHub와 PR, CLI, agent mode, code review 연결 | Pro $10, Pro+ $39, Max $100, AI Credits 기반 | PR 리뷰, 작은 이슈 처리, GitHub workflow |
+| Gemini CLI / Code Assist | Google Cloud quota와 IDE/CLI 통합 | Standard 1,500 requests/day, Enterprise 2,000 requests/day | GCP 인프라와 함께 쓰는 코드 지원 |
+
+이 표는 순위를 고정하려는 목적이 아닙니다. agent는 모델 성능, wrapper, 도구 권한, 비용 구조가 같이
+움직입니다. 같은 모델을 써도 Cursor의 editor loop와 CLI agent의 repository loop는 실패 양상이 다릅니다.
+
+<Mermaid title="AI agent 선택 기준">
+{`flowchart TD
+  Task["작업 유형"] --> Scope["파일 범위와 실행 시간"]
+  Task --> Risk["실패 비용과 권한"]
+  Task --> Evidence["필요한 검증 증거"]
+
+  Scope --> Harness["Agent harness 선택"]
+  Risk --> Approval["승인과 sandbox"]
+  Evidence --> Eval["테스트와 eval"]
+
+  Harness --> Loop["plan -> code -> test -> review loop"]
+  Approval --> Loop
+  Eval --> Loop
+  Loop --> Result["merge 또는 rollback"]
+`}
+</Mermaid>
+
+## Grok 4.6은 왜 따로 봐야 하는가
+
+xAI 공식 문서 기준 Grok 4.6의 model name은 `grok-4.6`이고 context window는 500,000 tokens입니다.
+공식 문서는 text와 image input, text output, configurable reasoning, Responses API, Chat
+Completions, function calling, web search, X search, code execution을 함께 제시합니다.
+
+가격표도 중요합니다. short context에서는 입력 $2, cached input $0.50, 출력 $6입니다. long context는
+200k token 이상에서 적용되며 입력 $4, cached input $1, 출력 $12입니다. 즉 Grok 4.6은 "긴 context를
+넣어도 된다"가 아니라 "긴 context를 넣을 수 있지만 비용 단계가 바뀐다"로 봐야 합니다.
+
+Spring Boot 개발자가 볼 포인트는 세 가지입니다.
+
+- 큰 repository나 긴 운영 로그를 한 번에 넣는 작업에 유리합니다.
+- web search와 X search 같은 외부 정보 도구가 붙으므로 사실 확인 workflow를 만들기 쉽습니다.
+- 긴 context 비용이 바뀌므로, 모든 파일을 통째로 넣는 방식은 가성비가 나빠질 수 있습니다.
+
+Grok Bot도 놓치면 안 됩니다. Cursor 공식 가격표는 Grok Bot access와 Higher Grok Bot usage limits를
+상위 플랜 혜택으로 분리해 적고 있습니다. 이는 Grok이 API 모델뿐 아니라 editor agent 제품 흐름에서도
+비교 대상이 됐다는 뜻입니다.
+
+## 성능 비교는 benchmark 이름부터 봐야 합니다
+
+AI agent 성능 비교에서 흔한 실수는 leaderboard 숫자 하나만 보는 것입니다. Terminal-Bench는 terminal
+환경에서 agent가 명령을 실행하고 문제를 해결하는 능력을 봅니다. SWE-bench는 GitHub issue 기반 코드
+수정 능력을 봅니다. Artificial Analysis는 intelligence, speed, cost, latency를 함께 비교하는 독립
+평가 체계를 설명합니다.
+
+Terminal-Bench 2.1 leaderboard를 보면 상위권은 비용 차이가 큽니다. 예를 들어 leaderboard에는 Codex,
+Claude Code, Cursor CLI, Gemini CLI가 서로 다른 모델과 effort 설정으로 올라와 있고, 같은 점수대라도
+task cost가 크게 다르게 나타납니다. 따라서 "제일 높은 점수"보다 다음 질문이 더 실무적입니다.
+
+| 질문 | 이유 |
+|---|---|
+| 내 작업은 terminal 조작인가, 코드 patch인가, 문서화인가 | benchmark와 실제 업무가 다르면 순위가 어긋납니다. |
+| 실패했을 때 rollback 비용은 얼마인가 | agent가 빠를수록 잘못된 변경도 빠르게 커질 수 있습니다. |
+| 같은 budget에서 몇 번 반복할 수 있는가 | 한 번 비싼 성공보다 세 번 싼 loop가 더 좋을 수 있습니다. |
+| test와 lint를 agent가 직접 돌릴 수 있는가 | 답변 품질보다 검증 루프가 더 중요할 때가 많습니다. |
+
+Spring Boot 팀이라면 자체 benchmark를 작게 만들어야 합니다. 예를 들어 controller validation 추가,
+JPA query 수정, integration test 보강, Dockerfile patch, GitHub Actions 실패 원인 분석 같은 10개
+작업을 골라 agent별로 같은 조건에서 돌립니다. 그 결과를 pass/fail, 걸린 시간, human correction 횟수,
+총 비용으로 기록하면 public leaderboard보다 훨씬 쓸모 있습니다.
+
+## 가성비는 모델 가격이 아니라 loop 비용입니다
+
+가격표만 보면 API token price가 싼 모델이 좋아 보입니다. 하지만 agent 작업의 비용은 다음 네 가지가
+합쳐진 값입니다.
+
+```text
+총 비용
+= 입력 context 비용
++ 출력 token 비용
++ 도구 실행 횟수와 대기 시간
++ 사람이 다시 읽고 고치는 시간
+```
+
+Codex는 ChatGPT 플랜 안에서 web, CLI, IDE, iOS, cloud integration을 묶어 쓰는 쪽이 강합니다.
+OpenAI 공식 가격 문서는 Codex와 ChatGPT Work가 같은 pricing, credits, usage limits를 공유한다고
+설명합니다. 팀에서는 usage가 token consumption으로 보이는 pay-as-you-go 좌석이 도입됐지만, 2026년
+6월 24일 업데이트 기준 새 Business pay-as-you-go 좌석은 더 이상 제공되지 않는다고 공지됐습니다.
+
+GitHub Copilot은 GitHub workflow에 붙은 가성비가 좋습니다. 공식 문서 기준 Copilot Pro는 $10,
+Pro+는 $39, Max는 $100이고, agent mode, code review, coding agent, CLI, chat은 AI Credits를 씁니다.
+작은 PR 리뷰나 GitHub issue 처리에는 설치와 권한 경계가 단순합니다.
+
+Cursor는 editor 중심 개발자에게 강합니다. 공식 가격표 기준 Individual Pro는 $20/mo이고 agent, Grok,
+MCPs, skills, hooks, Cloud Agents, Bugbot 같은 기능이 들어갑니다. Pro+와 Ultra는 Agent와 Grok Bot
+한도가 커집니다. 매일 IDE에서 파일을 직접 고치는 개발자라면 모델 API를 따로 엮는 것보다 friction이
+낮습니다.
+
+Gemini Code Assist와 Gemini CLI는 Google Cloud quota 체계 안에서 보는 편이 맞습니다. 공식 quota
+문서 기준 agent mode와 Gemini CLI 요청은 합산되고, Standard는 사용자당 하루 1,500 requests,
+Enterprise는 2,000 requests입니다. GCP 프로젝트와 권한 관리가 이미 있는 팀에는 운영 경계가 선명합니다.
+
+## harness engineering은 agent의 작업장을 설계하는 일입니다
+
+harness engineering은 모델을 둘러싼 실행 환경을 설계하는 일입니다. terminal, file system, browser,
+test runner, package manager, approval, sandbox, memory, tool routing을 어떻게 묶을지 정합니다.
+
+Spring Boot 팀에서 바로 만들 수 있는 최소 harness는 다음과 같습니다.
+
+```text
+작업 입력: GitHub issue 또는 짧은 목표 문서
+허용 도구: rg, sed, test command, build command, git diff
+금지 도구: production deploy, database delete, secret read
+필수 증거: 실패 재현, 수정 diff, test 결과, rollback 방법
+출력 형식: 변경 요약, 검증 결과, 남은 리스크
+```
+
+핵심은 agent에게 모든 권한을 주지 않는 것입니다. 예를 들어 Spring Boot repository에서는 `./gradlew test`,
+`./gradlew bootJar`, `rg`, `git diff`는 허용하지만 운영 DB 접속과 배포 명령은 사람 승인 없이는 막습니다.
+agent가 잘하는 일은 빠른 탐색과 반복이고, 사람이 지켜야 할 일은 위험 권한과 최종 책임입니다.
+
+## loop engineering은 한 번의 답보다 반복 품질을 높이는 일입니다
+
+loop engineering은 agent에게 한 번에 정답을 요구하지 않고, plan, edit, test, review, refine을 반복하게
+만드는 방식입니다.
+
+좋은 loop는 짧습니다.
+
+```text
+1. 문제를 한 문장으로 다시 쓴다.
+2. 관련 파일 3~8개만 읽는다.
+3. 실패 테스트나 재현 명령을 먼저 잡는다.
+4. 최소 diff를 만든다.
+5. test와 build를 돌린다.
+6. 실패하면 원인만 좁혀 다시 돈다.
+7. 성공하면 diff와 residual risk를 보고한다.
+```
+
+agent를 잘 쓰는 팀은 "한 번에 큰 기능 만들어 줘"보다 "이 failing test를 통과시키되 public API는 바꾸지
+마"처럼 loop의 폭을 줄입니다. 이렇게 해야 Codex, Claude Code, Cursor, Copilot, Grok 어느 쪽을 쓰든
+비용과 실패 범위를 통제할 수 있습니다.
+
+## context engineering은 많이 넣는 일이 아니라 덜 틀리게 넣는 일입니다
+
+긴 context window는 유리하지만, 모든 파일을 다 넣는다고 결과가 좋아지는 것은 아닙니다. Grok 4.6처럼
+500k context를 제공하는 모델도 long context 가격 단계가 있습니다. Codex나 Claude Code처럼 repository
+탐색을 잘하는 agent도 잘못된 파일을 많이 읽으면 관심이 흐려질 수 있습니다.
+
+실무에서는 다음 순서가 낫습니다.
+
+- 먼저 `rg`로 symbol, route, error text를 찾습니다.
+- 변경 대상 주변 파일을 읽고, 관련 test를 찾습니다.
+- 아키텍처 설명은 짧은 메모로 넣고, 실제 코드는 필요한 부분만 줍니다.
+- 오래된 문서와 최신 코드를 섞을 때는 어느 쪽이 진실인지 명시합니다.
+- secret, 운영 URL, 개인 정보는 context에 넣지 않습니다.
+
+이 방식은 Spring Boot에서도 익숙합니다. Service 하나를 고치는데 전체 monorepo를 읽히기보다, Controller,
+Service, Repository, DTO, test, migration 정도로 좁혀야 합니다.
+
+## 이번 주 실험: agent별로 같은 작은 작업을 시킨다
+
+바로 따라 해 볼 수 있는 실험은 agent tournament가 아니라 작은 eval입니다.
+
+| 작업 | 성공 기준 | 관찰할 지표 |
+|---|---|---|
+| Controller validation 추가 | invalid request test 통과 | 수정 파일 수, test 생성 품질 |
+| JPA N+1 의심 쿼리 분석 | 재현 또는 반증 근거 제시 | 근거 파일과 SQL 이해도 |
+| CI 실패 원인 찾기 | 실패 log에서 root cause 분리 | 쓸데없는 변경 여부 |
+| 문서와 코드 불일치 찾기 | 실제 코드 기준 정정 제안 | 오래된 문서에 속는지 여부 |
+| Docker build 실패 수정 | local build 성공 | package manager와 cache 이해도 |
+
+각 agent에게 같은 입력을 주고, 사람은 다음만 기록합니다.
+
+```text
+성공 여부:
+걸린 시간:
+사람 개입 횟수:
+실행한 command:
+최종 diff 크기:
+되돌릴 수 있는가:
+비용 또는 quota 소모:
+```
+
+이 표를 2주만 쌓아도 "우리 팀에는 어떤 agent가 제일 좋은가"가 보입니다. public benchmark는 후보를
+좁히는 데 쓰고, 실제 선택은 내 repository의 반복 실험으로 정하는 편이 맞습니다.
+
+## 지금의 선택 기준
+
+개인 개발자라면 Cursor나 Copilot처럼 daily workflow 안에 들어오는 도구가 시작점으로 좋습니다. 코드
+작성, 자동완성, 작은 수정, PR 설명처럼 매일 반복되는 작업에서 friction이 낮기 때문입니다.
+
+저장소 단위 변경과 자동화가 많다면 Codex나 Claude Code류 CLI agent가 낫습니다. build, test, diff,
+검증 보고까지 한 번에 묶기 좋습니다. 긴 리팩터링은 Claude Code가 편한 경우가 많고, multi-step 구현과
+검증 자동화는 Codex가 잘 맞는 경우가 많습니다.
+
+Grok 4.6은 긴 context와 검색 결합, API 가격 구조를 보고 선택합니다. 큰 설계 문서, 긴 운영 로그,
+외부 최신 정보까지 섞는 조사와 coding task에서는 강한 후보입니다. 다만 200k token 이상 long context
+가격이 바뀌므로 context를 무제한으로 넣는 습관은 피해야 합니다.
+
+팀 도입이라면 GitHub Copilot, Cursor Teams, Gemini Code Assist처럼 권한, billing, usage analytics,
+SSO, organization policy가 붙은 제품을 먼저 봅니다. agent 성능보다 운영 통제와 감사가 먼저 막히기
+때문입니다.
+
+## 실무 체크리스트
+
+- [ ] agent별로 맡길 작업 유형을 정한다. 예: 탐색, 구현, test, review, 문서화.
+- [ ] production deploy, DB 변경, secret 접근은 사람 승인 없이는 금지한다.
+- [ ] agent 실행 전 목표, 금지 변경, 검증 명령, rollback 기준을 적는다.
+- [ ] public benchmark는 후보 선정에만 쓰고, repository별 작은 eval을 만든다.
+- [ ] long context 모델은 파일 전체 주입보다 검색과 요약 context를 먼저 쓴다.
+- [ ] 비용은 token price가 아니라 성공까지의 반복 횟수와 사람 수정 시간을 포함해 본다.
+- [ ] Grok 4.6, Codex, Claude Code, Cursor, Copilot, Gemini CLI를 같은 작업 5개로 비교한다.
+
+## 참고자료
+
+- [Grok 4.6 공식 문서](https://docs.x.ai/developers/grok-4-6)
+- [xAI API pricing](https://docs.x.ai/developers/pricing)
+- [OpenAI Codex pricing](https://learn.chatgpt.com/docs/pricing)
+- [Codex pay-as-you-go pricing for teams](https://openai.com/index/codex-flexible-pricing-for-teams/)
+- [GitHub Copilot plans](https://docs.github.com/en/copilot/get-started/plans)
+- [GitHub Copilot pricing](https://github.com/features/copilot/plans)
+- [Cursor pricing](https://cursor.com/pricing)
+- [Cursor models and pricing](https://cursor.com/docs/models-and-pricing)
+- [Gemini for Google Cloud quotas](https://docs.cloud.google.com/gemini/docs/quotas)
+- [Terminal-Bench 2.1 leaderboard](https://www.tbench.ai/leaderboard/terminal-bench/2.1)
+- [Artificial Analysis](https://artificialanalysis.ai/)

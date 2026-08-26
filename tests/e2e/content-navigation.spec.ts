@@ -5,21 +5,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /관계 기반 삭제 회고/ })
+    .getByRole("link", { name: /AI agent 비교/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/relationship-delete-transaction-retrospective-2026-08-26\/$/,
+    /\/blog\/posts\/ai-agent-comparison-2026-08-26\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "관계 기반 삭제 회고: 오래된 WHERE가 초기화를 막습니다",
+    "AI agent 비교: Grok 4.6, Codex, Claude Code, Cursor를 어떻게 고를까",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "부모 행과 자식 행의 관계를 따라 삭제 순서와 트랜잭션 경계를 점검하는 백엔드 설계 다이어그램",
+    "여러 AI coding agent를 성능, 비용, 승인, 평가, 롤백 기준으로 비교하는 엔지니어링 대시보드",
   );
 });
 
@@ -67,12 +67,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /관계 기반 삭제 회고/,
+      name: /AI agent 비교/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Flutter 셋째 걸음/,
+      name: /Flutter 넷째 걸음/,
     }),
   ).toBeVisible();
 });
@@ -107,14 +107,14 @@ test("카테고리와 태그로 공개 글을 탐색할 수 있다", async ({ pa
   await expect(page).toHaveURL(/\/blog\/categories\/Frontend\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Frontend 글");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 셋째 걸음/ }),
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 넷째 걸음/ }),
   ).toBeVisible();
 
   await page.getByRole("link", { name: "#Flutter", exact: true }).first().click();
   await expect(page).toHaveURL(/\/blog\/tags\/Flutter\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("#Flutter");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 셋째 걸음/ }),
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 넷째 걸음/ }),
   ).toBeVisible();
 });
 
@@ -146,14 +146,14 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("학습 글");
   await expect(
     page.getByRole("link", {
-      name: "Spring Boot 개발자를 위한 Next.js 첫걸음",
+      name: /Spring Boot 개발자를 위한 Flutter 넷째 걸음/,
     }),
   ).toBeVisible();
 
   await page.getByRole("link", { name: "다음" }).click();
   await expect(page).toHaveURL(/\/blog\/kinds\/learning\/page\/2\/$/);
   await expect(
-    page.getByRole("link", { name: "Astro로 기술 블로그 시작하기" }),
+    page.getByRole("link", { name: "Spring Boot 개발자를 위한 Next.js 첫걸음" }),
   ).toBeVisible();
 });
 
