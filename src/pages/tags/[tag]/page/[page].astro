@@ -1,28 +1,32 @@
 ---
-import Pagination from "../../components/Pagination.astro";
-import PostList from "../../components/PostList.astro";
-import BaseLayout from "../../layouts/BaseLayout.astro";
-import { paginateItems } from "../../lib/pagination";
-import { getPublishedPosts } from "../../lib/posts";
+import Pagination from "../../../../components/Pagination.astro";
+import PostList from "../../../../components/PostList.astro";
+import BaseLayout from "../../../../layouts/BaseLayout.astro";
+import {
+  getAdditionalPageNumbers,
+  paginateItems,
+} from "../../../../lib/pagination";
+import { getPublishedPosts } from "../../../../lib/posts";
 
 export async function getStaticPaths() {
   const posts = await getPublishedPosts();
   const tags = [...new Set(posts.flatMap(({ data }) => data.tags))];
 
-  return tags.map((tag) => ({
-    params: { tag },
-    props: {
-      tag,
-      posts: posts.filter(({ data }) => data.tags.includes(tag)),
-    },
-  }));
+  return tags.flatMap((tag) => {
+    const taggedPosts = posts.filter(({ data }) => data.tags.includes(tag));
+
+    return getAdditionalPageNumbers(taggedPosts.length).map((page) => ({
+      params: { page: String(page), tag },
+      props: { page, posts: taggedPosts, tag },
+    }));
+  });
 }
 
-const { tag, posts } = Astro.props;
-const page = paginateItems(posts, 1);
+const { page: currentPage, posts, tag } = Astro.props;
+const page = paginateItems(posts, currentPage);
 ---
 
-<BaseLayout title={`#${tag}`} description={`${tag} 태그의 공개 기술 글입니다.`}>
+<BaseLayout title={`#${tag} ${page.currentPage}페이지`} description={`${tag} 태그의 공개 기술 글 ${page.currentPage}페이지입니다.`}>
   <header class="archive-header">
     <p>태그</p>
     <h1>#{tag}</h1>

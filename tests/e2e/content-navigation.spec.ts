@@ -77,18 +77,64 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
   ).toBeVisible();
 });
 
+test("홈 최신 글은 페이지네이션으로 다음 페이지를 탐색할 수 있다", async ({ page }) => {
+  await page.goto("/blog/");
+
+  const pagination = page.getByRole("navigation", { name: "최신 글 페이지 이동" });
+  await expect(pagination).toBeVisible();
+  await expect(pagination.getByText("1", { exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+
+  const nextPage = pagination.getByRole("link", { name: "다음" });
+  await expect(nextPage).toHaveAttribute("href", "/blog/page/2/");
+  await nextPage.click();
+
+  await expect(page).toHaveURL(/\/blog\/page\/2\/$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("최신 글 2페이지");
+  await expect(
+    page.getByRole("navigation", { name: "최신 글 페이지 이동" }).getByRole("link", {
+      name: "이전",
+    }),
+  ).toHaveAttribute("href", "/blog/");
+});
+
 test("카테고리와 태그로 공개 글을 탐색할 수 있다", async ({ page }) => {
   await page.goto("/blog/");
 
-  await page.getByRole("link", { name: "Tooling", exact: true }).first().click();
-  await expect(page).toHaveURL(/\/blog\/categories\/Tooling\/$/);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Tooling 글");
-  await expect(page.getByRole("link", { name: "Astro로 기술 블로그 시작하기" })).toBeVisible();
+  await page.getByRole("link", { name: "Frontend", exact: true }).first().click();
+  await expect(page).toHaveURL(/\/blog\/categories\/Frontend\/$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Frontend 글");
+  await expect(
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 셋째 걸음/ }),
+  ).toBeVisible();
 
-  await page.getByRole("link", { name: "#Astro", exact: true }).click();
-  await expect(page).toHaveURL(/\/blog\/tags\/Astro\/$/);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("#Astro");
-  await expect(page.getByRole("link", { name: "Astro로 기술 블로그 시작하기" })).toBeVisible();
+  await page.getByRole("link", { name: "#Flutter", exact: true }).first().click();
+  await expect(page).toHaveURL(/\/blog\/tags\/Flutter\/$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("#Flutter");
+  await expect(
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 셋째 걸음/ }),
+  ).toBeVisible();
+});
+
+test("글이 많은 태그는 페이지네이션으로 다음 페이지를 제공한다", async ({ page }) => {
+  await page.goto("/blog/tags/Spring%20Boot/");
+
+  const pagination = page.getByRole("navigation", { name: "#Spring Boot 페이지 이동" });
+  await expect(pagination).toBeVisible();
+
+  const nextPage = pagination.getByRole("link", { name: "다음" });
+  await expect(nextPage).toHaveAttribute("href", "/blog/tags/Spring%20Boot/page/2/");
+  await nextPage.click();
+
+  await expect(page).toHaveURL(/\/blog\/tags\/Spring%20Boot\/page\/2\/$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("#Spring Boot");
+  await expect(
+    page.getByRole("navigation", { name: "#Spring Boot 페이지 이동" }).getByRole("link", {
+      name: "이전",
+    }),
+  ).toHaveAttribute("href", "/blog/tags/Spring%20Boot/");
 });
 
 test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page }) => {
@@ -103,6 +149,9 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
       name: "Spring Boot 개발자를 위한 Next.js 첫걸음",
     }),
   ).toBeVisible();
+
+  await page.getByRole("link", { name: "다음" }).click();
+  await expect(page).toHaveURL(/\/blog\/kinds\/learning\/page\/2\/$/);
   await expect(
     page.getByRole("link", { name: "Astro로 기술 블로그 시작하기" }),
   ).toBeVisible();

@@ -1,0 +1,66 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import Pagination from "../../components/Pagination.astro";
+import PostList from "../../components/PostList.astro";
+import { splitHomePosts } from "../../lib/home";
+import {
+  getAdditionalPageNumbers,
+  paginateItems,
+} from "../../lib/pagination";
+import { getPublishedPosts } from "../../lib/posts";
+
+export async function getStaticPaths() {
+  const posts = await getPublishedPosts();
+  const { latestPosts } = splitHomePosts(posts);
+
+  return getAdditionalPageNumbers(latestPosts.length).map((page) => ({
+    params: { page: String(page) },
+    props: { latestPosts, page },
+  }));
+}
+
+const { latestPosts, page } = Astro.props;
+const latestPage = paginateItems(latestPosts, page);
+---
+
+<BaseLayout
+  title={`최신 글 ${latestPage.currentPage}페이지`}
+  description={`Field Notes 최신 글 ${latestPage.currentPage}페이지입니다.`}
+>
+  <header class="archive-header">
+    <p>최근 기록</p>
+    <h1>최신 글 {latestPage.currentPage}페이지</h1>
+    <span>{latestPage.totalItems}개의 글 · {latestPage.currentPage}/{latestPage.totalPages}페이지</span>
+  </header>
+  <PostList posts={latestPage.items} />
+  <Pagination
+    basePath="/"
+    currentPage={latestPage.currentPage}
+    totalPages={latestPage.totalPages}
+    label="최신 글 페이지 이동"
+  />
+</BaseLayout>
+
+<style>
+  .archive-header {
+    margin-bottom: 36px;
+  }
+
+  .archive-header p,
+  .archive-header span {
+    color: var(--color-muted);
+    font-size: 14px;
+  }
+
+  .archive-header p {
+    margin: 0 0 6px;
+    color: var(--color-accent);
+    font-weight: 700;
+  }
+
+  h1 {
+    margin: 0 0 8px;
+    font-size: 40px;
+    letter-spacing: 0;
+  }
+</style>

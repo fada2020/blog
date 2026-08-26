@@ -1,36 +1,41 @@
 ---
-import type { PostKind } from "../../content.config";
-import Pagination from "../../components/Pagination.astro";
-import PostList from "../../components/PostList.astro";
-import BaseLayout from "../../layouts/BaseLayout.astro";
-import { paginateItems } from "../../lib/pagination";
-import { kindLabels } from "../../lib/post-kind";
-import { getPublishedPosts } from "../../lib/posts";
+import type { PostKind } from "../../../../content.config";
+import Pagination from "../../../../components/Pagination.astro";
+import PostList from "../../../../components/PostList.astro";
+import BaseLayout from "../../../../layouts/BaseLayout.astro";
+import {
+  getAdditionalPageNumbers,
+  paginateItems,
+} from "../../../../lib/pagination";
+import { kindLabels } from "../../../../lib/post-kind";
+import { getPublishedPosts } from "../../../../lib/posts";
 
 export async function getStaticPaths() {
   const posts = await getPublishedPosts();
   const kinds = [...new Set(posts.map(({ data }) => data.kind))];
 
-  return kinds.map((kind) => ({
-    params: { kind },
-    props: {
-      kind,
-      posts: posts.filter(({ data }) => data.kind === kind),
-    },
-  }));
+  return kinds.flatMap((kind) => {
+    const kindPosts = posts.filter(({ data }) => data.kind === kind);
+
+    return getAdditionalPageNumbers(kindPosts.length).map((page) => ({
+      params: { kind, page: String(page) },
+      props: { kind, page, posts: kindPosts },
+    }));
+  });
 }
 
-const { kind, posts } = Astro.props as {
+const { kind, page: currentPage, posts } = Astro.props as {
   kind: PostKind;
+  page: number;
   posts: Awaited<ReturnType<typeof getPublishedPosts>>;
 };
 const label = kindLabels[kind];
-const page = paginateItems(posts, 1);
+const page = paginateItems(posts, currentPage);
 ---
 
 <BaseLayout
-  title={`${label} 글`}
-  description={`${label} 유형의 공개 기술 글입니다.`}
+  title={`${label} 글 ${page.currentPage}페이지`}
+  description={`${label} 유형의 공개 기술 글 ${page.currentPage}페이지입니다.`}
 >
   <header class="archive-header">
     <p>글 유형</p>
