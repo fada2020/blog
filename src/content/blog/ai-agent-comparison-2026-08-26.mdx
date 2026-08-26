@@ -39,14 +39,38 @@ Grok은 이제 "화제성 모델"이 아니라 agent 제품 선택지 안에 들
 
 ## 이번 주 비교 대상
 
-| 도구 | 강점 | 비용/한도 관점 | 먼저 써 볼 작업 |
-|---|---|---|---|
-| Grok 4.6 API | 긴 context, tool use, 검색 결합, 코딩·지식 작업 | short context $2 input / $6 output, 200k 이상은 long context 가격 | 큰 로그, 긴 설계 문서, 외부 검색이 붙은 조사 |
-| Cursor | editor 안 agent, Grok Bot, Cloud Agents, Bugbot | Individual Pro $20/mo부터, 상위 플랜은 agent와 Grok Bot 한도 증가 | 일상 구현, 파일 여러 개 수정, IDE 중심 작업 |
-| Codex | CLI, web, IDE, cloud task, 자동 리뷰와 팀 사용량 관리 | ChatGPT 플랜 포함, 팀은 seat/credit 또는 pay-as-you-go 정책 | 저장소 단위 변경, 테스트 실행, 자동화 반복 작업 |
-| Claude Code | 긴 자율 coding session, 대화형 refactor와 설명 | Claude 플랜의 usage limit 안에서 사용 | 복잡한 리팩터링, 긴 코드 읽기, 설계 검토 |
-| GitHub Copilot | GitHub와 PR, CLI, agent mode, code review 연결 | Pro $10, Pro+ $39, Max $100, AI Credits 기반 | PR 리뷰, 작은 이슈 처리, GitHub workflow |
-| Gemini CLI / Code Assist | Google Cloud quota와 IDE/CLI 통합 | Standard 1,500 requests/day, Enterprise 2,000 requests/day | GCP 인프라와 함께 쓰는 코드 지원 |
+<div class="agent-compare-grid" aria-label="이번 주 AI agent 비교 대상">
+  <article>
+    <h3>Grok 4.6 API</h3>
+    <p>긴 context, 검색, code execution이 필요한 조사형 coding task.</p>
+    <span>Short context $2 input / $6 output</span>
+  </article>
+  <article>
+    <h3>Cursor</h3>
+    <p>IDE 안에서 여러 파일을 고치고 Grok Bot, Cloud Agents까지 쓰는 daily coding.</p>
+    <span>Individual Pro $20/mo부터</span>
+  </article>
+  <article>
+    <h3>Codex</h3>
+    <p>저장소 단위 변경, 테스트 실행, 자동 리뷰와 장기 실행 작업.</p>
+    <span>ChatGPT 플랜과 team usage 정책</span>
+  </article>
+  <article>
+    <h3>Claude Code</h3>
+    <p>긴 코드 읽기, 복잡한 리팩터링, 설계 검토가 필요한 자율 coding session.</p>
+    <span>Claude 플랜 usage limit 안에서 사용</span>
+  </article>
+  <article>
+    <h3>GitHub Copilot</h3>
+    <p>GitHub issue, PR review, CLI, agent mode 중심의 repository workflow.</p>
+    <span>Pro $10, Pro+ $39, Max $100</span>
+  </article>
+  <article>
+    <h3>Gemini CLI / Code Assist</h3>
+    <p>GCP 권한과 quota 안에서 IDE, CLI, agent mode를 묶는 작업.</p>
+    <span>Standard 1,500 / Enterprise 2,000 requests/day</span>
+  </article>
+</div>
 
 이 표는 순위를 고정하려는 목적이 아닙니다. agent는 모델 성능, wrapper, 도구 권한, 비용 구조가 같이
 움직입니다. 같은 모델을 써도 Cursor의 editor loop와 CLI agent의 repository loop는 실패 양상이 다릅니다.
