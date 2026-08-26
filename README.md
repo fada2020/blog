@@ -49,8 +49,9 @@ draft: true
 ```
 
 작성 중인 글은 반드시 `draft: true`로 유지합니다. 초안과 미래 발행 글은
-목록, 검색, RSS, Sitemap, 정적 HTML에서 제외됩니다. 검토와 승인까지 끝난
-글만 `draft: false`로 변경합니다.
+목록, 검색, RSS, Sitemap, 정적 HTML에서 제외됩니다. 자동화가 익명화,
+공식 근거 확인, 빌드와 E2E 검증을 모두 통과한 글만 `draft: false`로
+변경합니다.
 
 ## 광고
 
@@ -75,7 +76,7 @@ AdSense 스크립트 로드를 끄려면 `PUBLIC_GOOGLE_ADSENSE_CLIENT=off`를
 
 ## 배포
 
-`main` 브랜치에 반영되면 GitHub Actions가 정적 사이트를 빌드해 GitHub
-Pages에 배포합니다. 필요하면 `GitHub Pages 배포` 워크플로를 수동으로
-실행할 수 있습니다. 진행 중인 배포는 새 실행이 시작되어도 취소하지
-않습니다.
+자동화는 검증 성공 시 PR을 만들지 않고 `main` 브랜치에 직접 푸시합니다.
+`main`에 반영되면 GitHub Actions가 정적 사이트를 빌드해 GitHub Pages에
+배포합니다. 필요하면 `GitHub Pages 배포` 워크플로를 수동으로 실행할 수
+있습니다. 진행 중인 배포는 새 실행이 시작되어도 취소하지 않습니다.
