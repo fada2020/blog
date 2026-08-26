@@ -17,10 +17,11 @@ import Mermaid from "../../components/Mermaid.astro";
 > **검증 범위**
 >
 > 2026년 8월 26일에 xAI Grok 4.6 공식 문서와 가격표, OpenAI Codex 가격 문서,
-> ChatGPT 가격표, Claude Pro/Max와 Claude Code 사용량 문서, GitHub Copilot 공식 가격과 플랜 문서,
-> Cursor 공식 가격과 모델 문서, Google Cloud Gemini Code Assist quota 문서, Terminal-Bench 2.1
-> leaderboard, Artificial Analysis 방법론 설명을 확인했습니다. Grok 4.6은 공식 문서에 표시된 현재
-> 모델과 가격을 기준으로 다뤘습니다. preview, beta, 연구 미리보기 기능은 안정 기능처럼 비교하지 않았습니다.
+> xAI SuperGrok 개인 플랜과 Grok Bot 공지, ChatGPT 가격표, Claude Pro/Max와 Claude Code 사용량 문서,
+> GitHub Copilot 공식 가격과 플랜 문서, Cursor 공식 가격과 모델 문서, Google Cloud Gemini Code Assist
+> quota 문서, Terminal-Bench 2.1 leaderboard, Artificial Analysis 방법론 설명을 확인했습니다.
+> Grok 4.6은 공식 문서에 표시된 현재 모델과 가격을 기준으로 다뤘습니다. preview, beta, 연구 미리보기
+> 기능은 안정 기능처럼 비교하지 않았습니다.
 
 ## 결론부터 말하면
 
@@ -132,6 +133,13 @@ Grok은 이제 "화제성 모델"이 아니라 agent 제품 선택지 안에 들
         <td>복잡한 코드를 오래 읽히는 날이 많으면 좋지만, coding sprint에는 빨리 막힐 수 있습니다.</td>
       </tr>
       <tr>
+        <td>SuperGrok / SuperGrok Plus + Grok</td>
+        <td>$30/mo 또는 $100/mo</td>
+        <td>Grok 4.6 chat, web/X search, image·video, Grok Build, Grok Bot</td>
+        <td>SuperGrok은 higher rate limits. Plus는 significantly higher usage와 Grok Bot access</td>
+        <td>X 검색과 Grok 최신 agent 흐름을 따라가려면 반드시 개인 플랜 비교에 넣어야 합니다.</td>
+      </tr>
+      <tr>
         <td>ChatGPT Pro 5x / 20x + Codex</td>
         <td>$100/mo 또는 $200/mo</td>
         <td>하루 여러 개 repo 작업, 장기 실행 task, 많은 이미지·리서치·자동화</td>
@@ -169,6 +177,9 @@ Grok은 이제 "화제성 모델"이 아니라 agent 제품 선택지 안에 들
   문서 작성, 자동화를 같이 처리할 수 있기 때문입니다.
 - **코드 읽기와 설계 검토가 많다면** Claude Pro + Claude Code를 붙입니다. 다만 Claude 일반 채팅과
   Claude Code가 같은 usage limit을 쓰므로, 긴 coding sprint에서는 빨리 한도를 만날 수 있습니다.
+- **Grok을 매주 보고 싶다면** SuperGrok도 비교표에 넣어야 합니다. $30 SuperGrok은 Grok 4.6과
+  higher rate limits가 핵심이고, $100 SuperGrok Plus는 Grok Bot access와 더 높은 사용량이 핵심입니다.
+  다만 Grok Build는 공식 공지 기준 early beta이므로 안정 coding agent처럼 과장하면 안 됩니다.
 - **이미 Plus와 Claude Pro를 둘 다 쓴다면** 같은 작업을 두 agent에게 반복시키지 않습니다. Codex는
   repo 수정과 test/build 증적에 쓰고, Claude는 설계 검토와 second review에 쓰는 편이 낫습니다.
 - **주 2~3회 이상 한도에 막힌다면** $20 구독을 더 늘리기보다 ChatGPT Pro 5x 또는 Claude Max 5x처럼
@@ -382,6 +393,11 @@ SSO, organization policy가 붙은 제품을 먼저 봅니다. agent 성능보�
 
 - [Grok 4.6 공식 문서](https://docs.x.ai/developers/grok-4-6)
 - [xAI API pricing](https://docs.x.ai/developers/pricing)
+- [xAI Grok plans](https://x.ai/pricing)
+- [Grok Bot is now included with more plans](https://x.ai/news/grok-bot-more-plans)
+- [Grok Bot FAQ](https://docs.x.ai/grok-bot/faq)
+- [Introducing Grok Build](https://x.ai/news/grok-build-cli)
+- [Use Grok in Kilo Code](https://x.ai/news/grok-kilocode)
 - [ChatGPT pricing](https://chatgpt.com/pricing/)
 - [OpenAI Codex pricing](https://learn.chatgpt.com/docs/pricing)
 - [Codex pay-as-you-go pricing for teams](https://openai.com/index/codex-flexible-pricing-for-teams/)
