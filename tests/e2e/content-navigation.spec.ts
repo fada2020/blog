@@ -5,19 +5,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /Flutter 셋째 걸음/ })
+    .getByRole("link", { name: /관계 기반 삭제 회고/ })
     .click();
 
-  await expect(page).toHaveURL(/\/blog\/posts\/flutter-async-data-2026-08-25\/$/);
+  await expect(page).toHaveURL(
+    /\/blog\/posts\/relationship-delete-transaction-retrospective-2026-08-26\/$/,
+  );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "Spring Boot 개발자를 위한 Flutter 셋째 걸음: FutureBuilder로 서버 데이터 다루기",
+    "관계 기반 삭제 회고: 오래된 WHERE가 초기화를 막습니다",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "Flutter 앱이 Future와 FutureBuilder를 통해 HTTP 응답을 loading, error, data 상태로 나누어 화면에 표시하는 기술 다이어그램",
+    "부모 행과 자식 행의 관계를 따라 삭제 순서와 트랜잭션 경계를 점검하는 백엔드 설계 다이어그램",
   );
 });
 
@@ -65,12 +67,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /Flutter 셋째 걸음/,
+      name: /관계 기반 삭제 회고/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /2026년 8월 넷째 주 IT 기술동향/,
+      name: /Flutter 셋째 걸음/,
     }),
   ).toBeVisible();
 });
