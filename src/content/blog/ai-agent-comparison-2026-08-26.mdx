@@ -39,37 +39,62 @@ Grok은 이제 "화제성 모델"이 아니라 agent 제품 선택지 안에 들
 
 ## 이번 주 비교 대상
 
-<div class="agent-compare-grid" aria-label="이번 주 AI agent 비교 대상">
-  <article>
-    <h3>Grok 4.6 API</h3>
-    <p>긴 context, 검색, code execution이 필요한 조사형 coding task.</p>
-    <span>Short context $2 input / $6 output</span>
-  </article>
-  <article>
-    <h3>Cursor</h3>
-    <p>IDE 안에서 여러 파일을 고치고 Grok Bot, Cloud Agents까지 쓰는 daily coding.</p>
-    <span>Individual Pro $20/mo부터</span>
-  </article>
-  <article>
-    <h3>Codex</h3>
-    <p>저장소 단위 변경, 테스트 실행, 자동 리뷰와 장기 실행 작업.</p>
-    <span>ChatGPT 플랜과 team usage 정책</span>
-  </article>
-  <article>
-    <h3>Claude Code</h3>
-    <p>긴 코드 읽기, 복잡한 리팩터링, 설계 검토가 필요한 자율 coding session.</p>
-    <span>Claude 플랜 usage limit 안에서 사용</span>
-  </article>
-  <article>
-    <h3>GitHub Copilot</h3>
-    <p>GitHub issue, PR review, CLI, agent mode 중심의 repository workflow.</p>
-    <span>Pro $10, Pro+ $39, Max $100</span>
-  </article>
-  <article>
-    <h3>Gemini CLI / Code Assist</h3>
-    <p>GCP 권한과 quota 안에서 IDE, CLI, agent mode를 묶는 작업.</p>
-    <span>Standard 1,500 / Enterprise 2,000 requests/day</span>
-  </article>
+<div className="agent-compare-table-wrap">
+  <table className="agent-compare-table">
+    <thead>
+      <tr>
+        <th>도구</th>
+        <th>잘 맞는 작업</th>
+        <th>강점</th>
+        <th>비용·한도</th>
+        <th>주의점</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Grok 4.6 API</td>
+        <td>긴 설계 문서, 운영 로그, 검색형 coding</td>
+        <td>500k context, web/X search, function calling, code execution</td>
+        <td>$2 input / $6 output. 200k 이상 long context 가격</td>
+        <td>큰 context를 무작정 넣으면 비용이 빨리 커집니다.</td>
+      </tr>
+      <tr>
+        <td>Cursor</td>
+        <td>IDE 안 multi-file 수정, daily implementation</td>
+        <td>editor agent, Grok Bot, Cloud Agents, Bugbot, MCP, hooks</td>
+        <td>Pro $20/mo부터. 상위 플랜은 agent/Grok Bot 한도 증가</td>
+        <td>빠르지만 실행 증적과 rollback 규칙을 따로 잡아야 합니다.</td>
+      </tr>
+      <tr>
+        <td>Codex</td>
+        <td>저장소 변경, 테스트 실행, 자동 리뷰, 장기 작업</td>
+        <td>CLI, web, IDE, cloud task를 같은 workflow로 연결</td>
+        <td>ChatGPT 플랜과 team usage 정책. Credit/usage 관리 필요</td>
+        <td>범위와 금지 명령이 흐리면 diff가 커질 수 있습니다.</td>
+      </tr>
+      <tr>
+        <td>Claude Code</td>
+        <td>긴 코드 읽기, 복잡한 리팩터링, 설계 검토</td>
+        <td>대화형 coding session, 코드 설명, 큰 refactor loop</td>
+        <td>Claude paid plan usage limit 공유. Heavy coding은 API credit 가능</td>
+        <td>긴 session이 편한 만큼 사용량 창을 자주 봐야 합니다.</td>
+      </tr>
+      <tr>
+        <td>GitHub Copilot</td>
+        <td>GitHub issue, PR review, 작은 수정, CLI workflow</td>
+        <td>repository, PR, code review, agent mode와 GitHub 권한</td>
+        <td>Pro $10, Pro+ $39, Max $100. Agent 기능은 AI Credits 사용</td>
+        <td>복잡한 로컬 검증 loop는 따로 설계해야 합니다.</td>
+      </tr>
+      <tr>
+        <td>Gemini CLI / Code Assist</td>
+        <td>GCP 프로젝트 코드 지원, cloud context 작업</td>
+        <td>Google Cloud 권한, IDE, CLI, agent mode, quota 체계</td>
+        <td>Standard 1,500 requests/day, Enterprise 2,000 requests/day</td>
+        <td>Agent mode와 CLI 사용량이 quota에 합산됩니다.</td>
+      </tr>
+    </tbody>
+  </table>
 </div>
 
 이 표는 순위를 고정하려는 목적이 아닙니다. agent는 모델 성능, wrapper, 도구 권한, 비용 구조가 같이
