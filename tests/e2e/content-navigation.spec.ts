@@ -5,21 +5,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /AI agent 비교/ })
+    .getByRole("link", { name: /백업 정책 회고/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/ai-agent-comparison-2026-08-26\/$/,
+    /\/blog\/posts\/backup-lifecycle-drift-retrospective-2026-08-27\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "AI agent 비교: Grok 4.6, Codex, Claude Code, Cursor를 어떻게 고를까",
+    "백업 정책 회고: 코드가 바뀌어도 보존 기간은 자동으로 줄지 않습니다",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "여러 AI coding agent를 성능, 비용, 승인, 평가, 롤백 기준으로 비교하는 엔지니어링 대시보드",
+    "Git의 백업 보존 정책과 실제 클라우드 복구 지점 수명 주기를 비교하며 드리프트를 점검하는 인프라 다이어그램",
   );
 });
 
@@ -49,12 +49,12 @@ test("홈은 관심 분야 링크 계약과 현재 학습 단계 표식을 유�
   await expect(backendLink).toHaveAttribute("href", "/blog/categories/Backend/");
 
   const roadmap = page.getByRole("list", { name: "학습 순서" });
-  const currentStep = roadmap.getByRole("listitem").filter({ hasText: "React Native" });
+  const currentStep = roadmap.getByRole("listitem").filter({ hasText: "Kotlin" });
 
   await expect(currentStep).toHaveAttribute("aria-current", "step");
   await expect(currentStep.getByText("현재 단계")).toBeVisible();
 
-  for (const label of ["Next.js", "Kotlin", "Flutter"]) {
+  for (const label of ["Next.js", "React Native", "Flutter"]) {
     await expect(roadmap.getByRole("listitem").filter({ hasText: label })).not.toHaveAttribute(
       "aria-current",
       "step",
@@ -67,12 +67,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /AI agent 비교/,
+      name: /백업 정책 회고/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Flutter 넷째 걸음/,
+      name: /Kotlin 둘째 걸음/,
     }),
   ).toBeVisible();
 });

@@ -1,0 +1,232 @@
+---
+title: "백업 정책 회고: 코드가 바뀌어도 보존 기간은 자동으로 줄지 않습니다"
+description: "Git에 반영된 백업 보존 기간과 실제 클라우드 Backup Plan이 어긋난 사례를 통해 Terraform apply, 대상 범위, 복구 지점 lifecycle 검증 기준을 정리합니다."
+publishedAt: 2026-08-27T08:55:00+09:00
+draft: false
+category: "Infrastructure"
+tags: ["AWS Backup", "Terraform", "RDS", "Spring Boot", "Runbook"]
+kind: "worklog"
+heroImage: "../../assets/blog/backup-lifecycle-drift-retrospective-2026-08-27/cover.webp"
+heroImageAlt: "Git의 백업 보존 정책과 실제 클라우드 복구 지점 수명 주기를 비교하며 드리프트를 점검하는 인프라 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+## 결론부터 말하면
+
+백업 보존 기간을 줄이는 변경은 코드 리뷰만으로 끝나지 않습니다. Git에는 `90일 보관` 설정이 들어갔지만,
+실제 클라우드 Backup Plan에는 이전 `1년 보관` 규칙이 남아 있을 수 있습니다. 그러면 다음 새벽 정기
+백업은 새 코드가 아니라 **현재 운영 Backup Plan**을 따라 생성됩니다.
+
+이번 회고의 핵심은 세 가지였습니다.
+
+- Terraform 코드는 의도이고, 실제 인프라 변경은 `apply`가 성공해야 반영됩니다.
+- Backup Plan의 lifecycle 변경과 이미 생성된 recovery point의 lifecycle은 같은 문제가 아닙니다.
+- `-target`으로 좁힌 workflow는 빠르지만, 무관한 리소스가 섞이면 성공한 변경과 실패한 변경을 분리해서
+  검증해야 합니다.
+
+Spring Boot 애플리케이션 관점으로 바꾸면, 배포 성공과 운영 상태 일치가 다르다는 이야기입니다. API가
+정상으로 뜨고 health check가 통과해도, 백업 보존 기간, 복구 지점 만료일, 권한, workflow 범위는 별도로
+확인해야 합니다.
+
+> 검증일: 2026-08-27. Spring 공식 프로젝트 페이지 기준 Spring Boot 안정 버전 `4.1.1`을 확인했습니다.
+> AWS Backup lifecycle과 recovery point lifecycle은 AWS Backup 공식 문서와 API Reference를 기준으로,
+> Terraform `apply`와 resource targeting 주의점은 HashiCorp Terraform 공식 문서를 기준으로 작성했습니다.
+
+## 문제가 된 모양
+
+운영 데이터베이스 백업 정책을 장기 보관에서 더 짧은 보존 기간으로 조정하는 작업이 있었습니다. 코드에는
+새 보존 기간이 반영되어 있었습니다. 관리 화면에서 만드는 수동 백업도 같은 기간을 쓰도록 맞췄습니다.
+
+문제는 실제 인프라였습니다. 클라우드 Backup Plan을 조회하니 운영 규칙은 여전히 이전 보존 기간을 사용하고
+있었습니다. 이미 그 규칙으로 생성된 정기 백업도 이전 만료일을 갖고 있었습니다.
+
+| 확인 대상 | 기대한 상태 | 실제로 봐야 하는 상태 |
+|---|---|---|
+| Git 설정 | 새 lifecycle 값 | 코드 리뷰와 merge 여부 |
+| Terraform state | 관리 대상 리소스 | import, plan, drift 여부 |
+| Backup Plan | 다음 백업에 적용될 규칙 | rule name, schedule, `DeleteAfterDays` |
+| Recovery point | 이미 생성된 백업 | 각 복구 지점의 calculated expiration |
+| Workflow 권한 | apply 가능 | 변경 대상별 IAM 권한 |
+
+여기서 가장 중요한 구분은 Backup Plan과 recovery point입니다. Plan은 앞으로 생성될 백업의 규칙입니다.
+이미 만들어진 recovery point는 자신의 lifecycle을 갖습니다. Plan을 바꿨다고 과거 복구 지점의 만료일이
+자동으로 짧아진다고 가정하면 안 됩니다.
+
+<Mermaid title="백업 보존 기간 드리프트 점검 흐름">
+{`flowchart TD
+  Git["Git 설정 변경"] --> Plan["terraform plan"]
+  Plan --> Apply["terraform apply"]
+  Apply --> LivePlan["실제 Backup Plan 조회"]
+  LivePlan --> Future["다음 백업부터 새 lifecycle 적용"]
+
+  LivePlan --> Existing["기존 recovery point 조회"]
+  Existing --> SeparateDecision["기존 만료일 변경은 별도 권한과 절차"]
+
+  Apply --> Partial{"workflow 일부 실패?"}
+  Partial -->|yes| Split["성공한 리소스와 실패한 리소스 분리"]
+  Split --> Verify["실제 운영 상태 재조회"]
+`}
+</Mermaid>
+
+## 기존 설계의 한계
+
+처음에는 코드 변경과 workflow 실행 상태를 같은 신호로 읽기 쉬웠습니다. Git에는 새 보존 기간이 있고,
+Terraform workflow가 돌아갔으니 실제 정책도 바뀌었을 것이라고 생각하기 쉽습니다.
+
+하지만 인프라 변경에는 단계가 더 많습니다.
+
+```text
+코드 변경
+-> plan 생성
+-> apply 실행
+-> cloud API 반영
+-> 실제 리소스 재조회
+-> 다음 예약 작업 또는 복구 훈련으로 효과 확인
+```
+
+이 중 하나라도 빠지면 "코드는 맞지만 운영은 이전 상태"가 됩니다. 특히 백업 정책은 매일 한 번만 실행되는
+경우가 많아, 잘못된 상태가 다음 예약 시간까지 눈에 띄지 않을 수 있습니다.
+
+또 하나의 한계는 workflow 범위였습니다. RDS 백업 작업만 확인하려고 만든 workflow가 같은 Terraform plan
+안의 다른 IAM 정책 변경까지 함께 잡을 수 있었습니다. 그러면 백업 변경은 성공했지만 IAM 변경 권한이 없어
+workflow 전체가 실패할 수 있습니다.
+
+이 상태를 단순히 "workflow 실패"로만 기록하면 실제로는 성공한 Backup Plan 변경까지 놓칩니다. 반대로
+"백업 변경은 성공했으니 됐다"로 끝내면 실패한 IAM 변경이 다음 apply에서 다시 나타납니다.
+
+## 선택한 설계
+
+해결 방향은 복잡하지 않았습니다. 백업 workflow의 책임을 좁히고, apply 이후 실제 운영 값을 바로 검증하는
+단계를 추가합니다.
+
+```text
+RDS 백업 workflow
+-> 백업 관련 Terraform target만 지정
+-> apply
+-> Backup Plan rule 재조회
+-> DeleteAfterDays가 기대값인지 확인
+-> 실패하면 workflow 실패 처리
+```
+
+`-target`은 강력하지만 일상적인 설계 도구로 쓰기에는 위험합니다. HashiCorp 문서도 resource targeting은
+예외적인 상황에 쓰는 기능이며, 전체 변경을 대표하지 않을 수 있다고 경고합니다. 그래서 target을 쓸 때는
+더더욱 "어떤 리소스를 일부러 포함했고, 어떤 리소스를 제외했는가"를 workflow 이름과 검증 단계에 드러내야
+합니다.
+
+| 설계 선택 | 이유 |
+|---|---|
+| Backup Plan을 명시 target에 포함 | 보존 기간 변경이 workflow 목적과 직접 연결됩니다. |
+| 백업과 무관한 IAM 정책 target 제외 | 권한 부족이 백업 apply를 다시 실패시키지 않게 합니다. |
+| apply 후 `DeleteAfterDays` 재조회 | Terraform 성공 로그가 아니라 실제 운영 값을 확인합니다. |
+| 기존 recovery point는 별도 절차로 분리 | Plan 변경과 과거 백업 만료일 변경을 섞지 않습니다. |
+
+## 구현에서 조심한 점
+
+가장 먼저 한 일은 "실패 원인"을 다시 분해하는 것이었습니다. apply 로그에서 여러 리소스가 함께 바뀌고
+있다면, 실패한 리소스와 이미 성공한 리소스를 분리해서 봐야 합니다.
+
+예를 들어 Backup Plan 변경이 먼저 성공하고, 뒤이어 IAM role policy 변경이 실패했다면 workflow 상태는
+실패입니다. 하지만 운영 Backup Plan은 이미 새 값일 수 있습니다. 이런 경우에는 다음 세 가지를 모두
+기록해야 합니다.
+
+- workflow 전체 결과는 실패입니다.
+- Backup Plan 변경 자체는 실제 리소스 조회로 성공을 확인했습니다.
+- 실패한 IAM 변경은 백업 정책과 무관하므로 workflow target에서 제거하거나 별도 권한 작업으로 분리합니다.
+
+검증 코드는 어렵지 않습니다. 중요한 것은 값 비교를 사람 눈으로만 하지 않는 것입니다.
+
+```bash
+aws backup get-backup-plan \
+  --backup-plan-id "$BACKUP_PLAN_ID" \
+  --query 'BackupPlan.Rules[?RuleName==`daily-90-days`].Lifecycle.DeleteAfterDays | [0]' \
+  --output text
+```
+
+이 값이 `90`이 아니면 workflow를 실패시킵니다. 이름만 바뀌었거나, state만 맞거나, 다른 region을 보고
+있어도 이 단계에서 걸러야 합니다.
+
+## 기존 recovery point는 자동으로 바뀌지 않습니다
+
+Backup Plan lifecycle은 앞으로 생성될 백업의 규칙입니다. 이미 생성된 recovery point는 별도의 lifecycle을
+갖고 있습니다. AWS Backup API에는 recovery point lifecycle을 업데이트하는 별도 작업이 있습니다. 이것은
+Plan 수정과 다른 권한, 다른 감사 로그, 다른 의사결정 대상입니다.
+
+그래서 기존 백업 만료일을 줄일지 여부는 별도 운영 판단으로 남깁니다.
+
+| 선택지 | 장점 | 주의점 |
+|---|---|---|
+| 기존 recovery point 유지 | 보수적이며 복구 가능 기간을 줄이지 않습니다. | 비용 절감 효과가 늦게 나타납니다. |
+| 기존 lifecycle도 줄임 | 정책 일관성과 비용 절감이 빠릅니다. | 별도 권한과 승인, 감사 기록이 필요합니다. |
+| 일부만 조정 | 수동 백업과 정기 백업을 구분할 수 있습니다. | 기준이 복잡하면 나중에 설명하기 어렵습니다. |
+
+백업은 삭제 정책과 붙어 있으므로 "원하는 기간보다 길다"도 단순한 낭비로만 보면 안 됩니다. 비용 문제이면서
+동시에 데이터 보관 정책 문제입니다. 반대로 "짧게 줄인다"는 것은 복구 가능성을 줄이는 변경입니다. 그래서
+기존 recovery point 변경은 자동화가 조용히 처리할 일이 아니라 승인과 증적을 남길 일입니다.
+
+## Spring Boot 운영에서 배운 점
+
+애플리케이션 서버는 수평 확장할 수 있습니다. 하지만 데이터베이스와 백업 정책은 모든 서버가 공유하는
+운영 경계입니다. Spring Boot 서비스가 정상 응답을 반환해도, 아래 항목은 별도 운영 신호로 봐야 합니다.
+
+| 항목 | 확인할 신호 |
+|---|---|
+| DB 연결 총량 | 태스크 수와 Hikari maximum pool size의 곱 |
+| 쓰기 병목 | 대량 INSERT, 배치 크기, lock wait |
+| 기간 조회 | index, partition, aggregation query plan |
+| 백업 정책 | Backup Plan schedule, lifecycle, recovery point 만료일 |
+| 복구 가능성 | 별도 복구 인스턴스 생성, row count 검증, rollback 절차 |
+
+여기서 백업은 "장애가 난 뒤 복구하는 기능"이 아닙니다. 매일 생성되는 운영 데이터입니다. 잘못된 보존 기간,
+복구 실패 권한, 오래된 runbook은 모두 운영 품질 문제입니다.
+
+Spring Boot 쪽에서는 actuator health와 metric으로 애플리케이션 상태를 봅니다. 인프라 쪽에서는 같은
+정도로 Backup Plan, recovery point, Terraform plan/apply 결과, IAM 권한을 봐야 합니다. 관측 대상이
+다를 뿐, 원칙은 같습니다. **의도한 상태와 실제 상태를 비교하고, 차이가 있으면 자동화가 실패해야 합니다.**
+
+## 회귀 테스트 대신 운영 검증을 둡니다
+
+이 유형의 작업은 일반 unit test만으로는 충분하지 않습니다. 코드 안의 값이 맞는지 확인하는 테스트는 필요하지만,
+실제 클라우드 리소스가 바뀌었는지는 원격 API를 다시 조회해야 합니다.
+
+최소 검증은 아래 순서가 적절했습니다.
+
+```text
+terraform validate
+-> terraform plan에서 변경 대상 확인
+-> terraform apply
+-> Backup Plan lifecycle 재조회
+-> 새 값이 기대값과 다르면 실패
+-> 다음 예약 백업이 생성된 뒤 recovery point 만료일 확인
+```
+
+마지막 단계가 중요합니다. Plan이 바뀌어도 다음 예약 백업이 정말 새 lifecycle로 생성되는지는 별도 확인이
+필요합니다. 즉시 증명하려면 온디맨드 백업을 만들 수 있지만, 비용과 운영 부하가 있으므로 자동화 범위에
+넣을지 결정해야 합니다.
+
+## 실무 체크리스트
+
+- [ ] Git에 있는 lifecycle 값과 실제 Backup Plan의 `DeleteAfterDays`를 비교한다.
+- [ ] workflow에서 target으로 포함한 리소스와 제외한 리소스를 명시한다.
+- [ ] apply 실패 시 어떤 리소스가 성공했고 어떤 리소스가 실패했는지 분리한다.
+- [ ] 기존 recovery point의 만료일은 Plan 변경과 별도로 조회한다.
+- [ ] 기존 recovery point lifecycle 변경은 별도 권한과 승인 절차로 처리한다.
+- [ ] 다음 예약 백업이 새 보존 기간으로 생성됐는지 확인한다.
+- [ ] 애플리케이션 health check와 인프라 정책 검증을 같은 완료 조건으로 섞지 않는다.
+
+## 참고자료
+
+- [Spring Boot 공식 프로젝트 페이지](https://spring.io/projects/spring-boot/) -
+  2026년 8월 27일 확인, Stable `4.1.1` 기준
+- [AWS Backup plan options and configuration](https://docs.aws.amazon.com/aws-backup/latest/devguide/plan-options-and-configuration.html) -
+  backup lifecycle, total retention period, `DeleteAfterDays` 기준
+- [AWS Backup Lifecycle API Reference](https://docs.aws.amazon.com/aws-backup/latest/APIReference/API_Lifecycle.html) -
+  recovery point 삭제일과 cold storage 이동일 필드 기준
+- [AWS Backup UpdateRecoveryPointLifecycle API](https://docs.aws.amazon.com/aws-backup/latest/APIReference/API_UpdateRecoveryPointLifecycle.html) -
+  기존 recovery point lifecycle 변경 작업 기준
+- [Terraform apply command](https://developer.hashicorp.com/terraform/cli/commands/apply) -
+  apply가 plan의 operation을 실행한다는 기준
+- [Terraform target resources tutorial](https://developer.hashicorp.com/terraform/tutorials/state/resource-targeting) -
+  `-target` 사용 시 전체 변경을 대표하지 않을 수 있다는 경고 기준

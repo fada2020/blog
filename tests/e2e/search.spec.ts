@@ -5,15 +5,15 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(29);
+  expect(entries).toHaveLength(31);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "AI agent 비교: Grok 4.6, Codex, Claude Code, Cursor를 어떻게 고를까",
+    "백업 정책 회고: 코드가 바뀌어도 보존 기간은 자동으로 줄지 않습니다",
   );
   expect(entries[0].href).toBe(
-    "/blog/posts/ai-agent-comparison-2026-08-26/",
+    "/blog/posts/backup-lifecycle-drift-retrospective-2026-08-27/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });
