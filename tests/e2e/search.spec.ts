@@ -5,15 +5,15 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(31);
+  expect(entries).toHaveLength(33);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "백업 정책 회고: 코드가 바뀌어도 보존 기간은 자동으로 줄지 않습니다",
+    "23개월 아이 케어: 비 예보가 있는 8월 마지막 주말 준비",
   );
   expect(entries[0].href).toBe(
-    "/blog/posts/backup-lifecycle-drift-retrospective-2026-08-27/",
+    "/blog/posts/toddler-weekend-care-plan-2026-08-28/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });

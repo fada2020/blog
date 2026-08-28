@@ -5,21 +5,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /백업 정책 회고/ })
+    .getByRole("link", { name: /23개월 아이 케어/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/backup-lifecycle-drift-retrospective-2026-08-27\/$/,
+    /\/blog\/posts\/toddler-weekend-care-plan-2026-08-28\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "백업 정책 회고: 코드가 바뀌어도 보존 기간은 자동으로 줄지 않습니다",
+    "23개월 아이 케어: 비 예보가 있는 8월 마지막 주말 준비",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "Git의 백업 보존 정책과 실제 클라우드 복구 지점 수명 주기를 비교하며 드리프트를 점검하는 인프라 다이어그램",
+    "비 예보가 있는 주말에 23개월 아이의 지원 제도, 건강 체크, 실내외 나들이 준비를 나누어 점검하는 육아 플랜 다이어그램",
   );
 });
 
@@ -67,12 +67,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /백업 정책 회고/,
+      name: /23개월 아이 케어/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Kotlin 둘째 걸음/,
+      name: /Kotlin 셋째 걸음/,
     }),
   ).toBeVisible();
 });

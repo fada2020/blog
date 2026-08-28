@@ -1,0 +1,304 @@
+---
+title: "Spring Boot 개발자를 위한 Kotlin 셋째 걸음: data class와 DTO 경계"
+description: "Java record, Lombok DTO, JPA entity 습관과 비교하며 Kotlin data class, primary constructor, copy, 불변 DTO 경계를 서버 코드에 적용하는 기준을 정리합니다."
+publishedAt: 2026-08-28T08:45:00+09:00
+draft: false
+category: "Backend"
+tags: ["Kotlin", "Data Class", "Spring Boot", "DTO", "Java Interop"]
+kind: "learning"
+heroImage: "../../assets/blog/kotlin-data-class-dto-boundary-2026-08-28/cover.webp"
+heroImageAlt: "Kotlin data class가 request DTO, command, response DTO로 나뉘어 Spring Boot 서비스 경계를 통과하는 백엔드 학습 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 Kotlin 학습"
+lesson: 3
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 8월 28일에 Kotlin 공식 릴리스 문서와 GitHub Releases를 확인했습니다.
+> 기준 버전은 안정 릴리스 `Kotlin 2.4.10`입니다. Kotlin release process 문서는 다음 안정 후보
+> `2.4.20`을 2026년 9월 예정으로 안내하므로, 이 글에서는 RC/EAP 기능을 안정 기능처럼 다루지 않습니다.
+> 문법 설명은 [Kotlin data classes](https://kotlinlang.org/docs/data-classes.html),
+> [Kotlin classes](https://kotlinlang.org/docs/classes.html),
+> [Kotlin properties](https://kotlinlang.org/docs/properties.html),
+> [Kotlin all-open compiler plugin](https://kotlinlang.org/docs/all-open-plugin.html),
+> [Spring Boot Kotlin support](https://docs.spring.io/spring-boot/reference/features/kotlin.html)를 기준으로 확인했습니다.
+
+## 결론부터 말하면
+
+Kotlin의 `data class`는 Java의 Lombok DTO를 더 짧게 쓰는 문법이 아닙니다. **값의 모양, 비교 기준,
+복사 방식, 불변 경계를 한 번에 드러내는 타입 선언**입니다.
+
+Spring Boot 개발자가 Kotlin을 처음 붙일 때 가장 자주 만나는 선택지는 DTO입니다. Java에서는 보통 다음
+방식으로 값을 담았습니다.
+
+- Java record로 불변 request/response를 만든다.
+- Lombok `@Getter`, `@Builder`, `@NoArgsConstructor`로 DTO boilerplate를 줄인다.
+- JPA entity를 API 응답에 그대로 내보내지 않기 위해 별도 DTO를 둔다.
+- service 내부 command와 외부 request DTO를 분리한다.
+
+Kotlin에서도 원칙은 같습니다. 다만 `data class`가 너무 편해서 모든 값을 하나의 만능 타입으로 쓰기 쉽습니다.
+이번 글의 핵심은 "어디에는 data class가 맞고, 어디에는 그냥 class나 entity가 맞는지"를 구분하는 것입니다.
+
+## 이번 주 개념
+
+Kotlin의 `data class`는 데이터를 담기 위한 클래스입니다.
+
+```kotlin
+data class RegisterRequest(
+    val email: String?,
+    val displayName: String?,
+)
+```
+
+primary constructor에 선언된 `val` 또는 `var` 프로퍼티를 기준으로 `equals`, `hashCode`, `toString`,
+`componentN`, `copy`가 생성됩니다.
+
+```kotlin
+val request = RegisterRequest(
+    email = "user@example.com",
+    displayName = "Kim",
+)
+
+val corrected = request.copy(displayName = "K. Kim")
+```
+
+이 동작은 편합니다. 하지만 편하다는 이유만으로 entity, command, response, event payload를 모두 같은
+타입으로 합치면 API 경계가 흐려집니다.
+
+| Kotlin 표현 | 의미 | 서버 코드에서 좋은 위치 |
+|---|---|---|
+| `data class RequestDto` | 외부 입력 모양 | controller 입구, nullable 허용 |
+| `data class Command` | 검증이 끝난 내부 명령 | service 입구, non-null 위주 |
+| `data class ResponseDto` | 외부 출력 모양 | controller 출구, 노출 필드만 포함 |
+| `class Entity` | 식별성과 생명주기가 있는 객체 | JPA, domain model |
+| `copy()` | 일부 값만 바꾼 새 값 | immutable value 변환 |
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Java record는 Kotlin data class와 가장 가까운 감각입니다.
+
+```java
+public record RegisterResponse(
+    Long id,
+    String email,
+    String displayName
+) {}
+```
+
+record는 짧고 불변입니다. 그래서 response DTO에는 잘 맞습니다. 하지만 기존 Spring Boot 프로젝트에는
+Lombok DTO도 많습니다.
+
+```java
+@Getter
+@NoArgsConstructor
+public class RegisterRequest {
+    private String email;
+    private String displayName;
+}
+```
+
+이런 DTO는 JSON 역직렬화와 Bean Validation을 위해 mutable field, no-arg constructor, annotation을 섞어
+왔습니다. Kotlin으로 옮길 때 그대로 `var`와 nullable을 남발하면 Kotlin의 장점이 줄어듭니다.
+
+```kotlin
+data class RegisterRequest(
+    val email: String?,
+    val displayName: String?,
+)
+```
+
+요청 DTO에서는 nullable을 허용할 수 있습니다. 외부 입력은 믿을 수 없기 때문입니다. 대신 service로 넘기기
+전에 command로 바꿉니다.
+
+```kotlin
+data class RegisterCommand(
+    val email: String,
+    val displayName: String,
+)
+
+fun RegisterRequest.toCommand(): RegisterCommand {
+    val email = email?.trim()?.lowercase()
+        ?: throw BadRequestException("email is required")
+    val displayName = displayName?.trim()
+        ?: throw BadRequestException("displayName is required")
+
+    return RegisterCommand(email = email, displayName = displayName)
+}
+```
+
+이렇게 하면 controller 입구의 불확실성과 service 내부의 신뢰 가능한 값을 분리할 수 있습니다.
+
+## Kotlin에서는 무엇이 다른가
+
+첫째, primary constructor가 필드 선언이자 생성자 계약입니다.
+
+```kotlin
+data class UserSummary(
+    val id: Long,
+    val email: String,
+    val displayName: String,
+)
+```
+
+Java처럼 생성자, getter, `equals`, `hashCode`, `toString`을 따로 늘어놓지 않아도 됩니다. 그래서 리뷰할 때
+"이 값 타입은 어떤 필드로 정의되는가"가 바로 보입니다.
+
+둘째, `val`을 기본으로 두면 DTO가 자연스럽게 불변이 됩니다.
+
+```kotlin
+val summary = UserSummary(1L, "user@example.com", "Kim")
+val renamed = summary.copy(displayName = "K. Kim")
+```
+
+값을 직접 바꾸는 대신 새 값을 만듭니다. API 응답, command, event payload처럼 요청 하나를 처리하는 동안
+값을 전달하는 객체에는 이 방식이 잘 맞습니다.
+
+셋째, generated `equals`의 기준을 의식해야 합니다. Kotlin 공식 문서 기준 data class의 자동 생성 함수는
+primary constructor의 프로퍼티를 사용합니다. body에 둔 프로퍼티는 그 기준에서 빠집니다.
+
+```kotlin
+data class ExportJob(
+    val id: Long,
+    val status: String,
+) {
+    var debugMemo: String = ""
+}
+```
+
+위 타입에서 `debugMemo`는 기본 `equals`, `hashCode`, `copy`의 핵심 값이 아닙니다. 이 사실을 모르고 cache
+key나 set membership에 쓰면 예상과 다르게 동작할 수 있습니다.
+
+<Mermaid title="Kotlin DTO 경계 설계 흐름">
+{`flowchart LR
+  Request["Request DTO<br/>nullable, external shape"] --> Normalize["validate + normalize"]
+  Normalize --> Command["Command<br/>non-null, service input"]
+  Command --> Service["Service<br/>transaction, domain rules"]
+  Service --> Entity["Entity<br/>identity + lifecycle"]
+  Service --> Response["Response DTO<br/>public output only"]
+
+  Entity -.avoid.-> Request
+  Entity -.avoid.-> Response
+`}
+</Mermaid>
+
+## 대응 개념 비교
+
+`data class`를 어디에 둘지 결정할 때는 값의 역할을 먼저 봅니다.
+
+| 질문 | `data class`가 어울림 | 다른 선택이 나음 |
+|---|---|---|
+| 값 비교가 필요한가 | request, response, command, projection | identity 중심 entity |
+| 생성 후 바꾸지 않아도 되는가 | `val` DTO | JPA mutable aggregate |
+| 일부 값만 바꾼 새 값이 필요한가 | `copy()` 기반 변환 | transaction 안의 상태 변경 |
+| Java에서 직접 호출해야 하는가 | 단순 DTO, record-like 타입 | binary contract가 중요한 public API |
+| Spring proxy가 필요한가 | 보통 필요 없음 | `@Service`, `@Configuration` class |
+
+JPA entity에는 `data class`를 신중하게 써야 합니다. entity는 "같은 필드 값을 가진 객체"보다 "영속성 컨텍스트
+안에서 식별자를 가진 객체"에 가깝습니다. lazy loading, proxy, 변경 감지, no-arg constructor 요구도 함께
+고려해야 합니다. Kotlin 공식 all-open 문서는 Spring 같은 framework가 proxy를 위해 `open` class를 필요로
+할 수 있고, `kotlin-spring` plugin이 그 부분을 도와준다고 설명합니다.
+
+## 최소 실행 예제
+
+다음 예제는 request DTO와 command, response DTO를 분리합니다.
+
+```kotlin
+data class CreateTodoRequest(
+    val title: String?,
+    val dueDate: String?,
+)
+
+data class CreateTodoCommand(
+    val title: String,
+    val dueDate: String?,
+)
+
+data class TodoResponse(
+    val id: Long,
+    val title: String,
+    val done: Boolean,
+)
+
+fun CreateTodoRequest.toCommand(): CreateTodoCommand {
+    val normalizedTitle = title?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: throw BadRequestException("title is required")
+
+    return CreateTodoCommand(
+        title = normalizedTitle,
+        dueDate = dueDate?.trim()?.takeIf { it.isNotEmpty() },
+    )
+}
+
+fun Todo.toResponse(): TodoResponse =
+    TodoResponse(
+        id = id,
+        title = title,
+        done = done,
+    )
+```
+
+controller에서는 변환 경계만 보입니다.
+
+```kotlin
+@PostMapping("/todos")
+fun create(@RequestBody request: CreateTodoRequest): TodoResponse {
+    val todo = todoService.create(request.toCommand())
+    return todo.toResponse()
+}
+```
+
+이 구조의 장점은 실패 지점이 분명하다는 점입니다.
+
+- request DTO는 외부 입력이라 nullable입니다.
+- command는 검증이 끝난 내부 입력이라 `title`이 non-null입니다.
+- entity는 service 내부에 남고, response DTO에 필요한 필드만 노출합니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫 번째 오해는 "data class면 항상 DTO다"입니다. data class는 값 객체를 만드는 좋은 도구지만, DTO라는
+아키텍처 역할을 자동으로 보장하지 않습니다. 외부 request, 내부 command, 외부 response를 같은 data class로
+공유하면 수정 이유가 섞입니다.
+
+두 번째 오해는 "`copy()`가 setter의 대체재다"입니다. `copy()`는 값 변환에 좋습니다. 하지만 transaction
+안에서 entity 상태를 바꾸는 행위까지 `copy()`로 처리하면 JPA 변경 감지와 맞지 않을 수 있습니다.
+
+세 번째 오해는 "짧으면 더 Kotlin답다"입니다. 서버 코드는 짧은 코드보다 경계가 중요합니다.
+
+```kotlin
+fun create(request: CreateTodoRequest) =
+    todoService.create(CreateTodoCommand(request.title!!, request.dueDate))
+```
+
+이 코드는 짧지만 request validation 경계를 숨깁니다. 운영 API에서는 아래처럼 조금 길어도 실패 이유가
+드러나는 코드가 낫습니다.
+
+```kotlin
+fun create(request: CreateTodoRequest): TodoResponse {
+    val command = request.toCommand()
+    val todo = todoService.create(command)
+    return todo.toResponse()
+}
+```
+
+## 연습 문제
+
+1. 기존 Java `CreateUserRequest` DTO를 Kotlin data class로 바꿔 보세요. 외부 입력 필드는 nullable로
+   두고, service로 넘길 command는 non-null로 분리합니다.
+2. JPA entity를 API response로 직접 반환하는 controller를 찾고, `toResponse()` 변환 함수를 추가해 보세요.
+3. body property가 있는 data class를 하나 만들어 `equals` 결과를 확인해 보세요. 어떤 필드가 비교 기준에서
+   빠지는지 직접 확인하면 cache key 설계에서 실수를 줄일 수 있습니다.
+4. `var`가 들어간 DTO를 `val`과 `copy()` 기반으로 바꿔도 테스트가 통과하는지 확인해 보세요.
+
+## 다음 글로 이어질 질문
+
+data class로 DTO 경계를 세우면 다음 질문은 자연스럽게 함수 경계로 이어집니다.
+
+**Kotlin extension function은 domain model을 더 읽기 좋게 만들까요, 아니면 숨은 coupling을 늘릴까요?**
+
+다음 Kotlin 학습 글에서는 extension function과 package 설계를 Spring Boot service, mapper, 테스트 코드
+관점에서 살펴보겠습니다.
