@@ -9,7 +9,8 @@ export type Category =
   | "DevOps"
   | "Observability"
   | "Database"
-  | "Tooling";
+  | "Tooling"
+  | "Economy";
 
 export type PostKind = "learning" | "trend" | "worklog" | "deep-dive";
 
@@ -29,6 +30,7 @@ const blog = defineCollection({
       "Observability",
       "Database",
       "Tooling",
+      "Economy",
     ]),
     tags: z.array(z.string().min(1)).min(1),
     kind: z.enum(["learning", "trend", "worklog", "deep-dive"]),
