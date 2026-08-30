@@ -1,0 +1,212 @@
+---
+title: "일요일 기술 심화: EOL을 만난 런타임과 데이터베이스를 업그레이드하는 순서"
+description: "Spring Boot 팀이 런타임, 컨테이너 이미지, 데이터베이스의 지원 종료와 보안 패치를 같은 운영 의사결정으로 다루는 방법을 정리합니다."
+publishedAt: 2026-08-30T09:00:00+09:00
+draft: false
+category: "DevOps"
+tags: ["Deep Dive", "EOL", "Spring Boot", "PostgreSQL", "Supply Chain"]
+kind: "deep-dive"
+heroImage: "../../assets/blog/runtime-eol-upgrade-playbook-2026-08-30/cover.webp"
+heroImageAlt: "런타임, 컨테이너 이미지, 데이터베이스 지원 종료와 패치 증적을 한 흐름으로 점검하는 운영 대시보드"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "주간 기술 심화"
+lesson: 1
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 범위**
+>
+> 2026년 8월 30일 09시 20분 KST에 Spring Boot 4.1.1과 4.0.8 공식 릴리스 글,
+> Spring AI 2.0.1 공식 릴리스 글, PostgreSQL 14 EOL 공지와 versioning policy,
+> Docker Hardened Images와 MinIO EOL 관련 Docker 공식 글, OpenTelemetry Java instrumentation
+> GitHub Releases를 확인했습니다. milestone, beta, RC는 운영 기준의 stable release처럼 다루지 않았습니다.
+
+## 이번 주에 이 기술이 중요했던 이유
+
+이번 주 글들은 표면적으로 서로 다른 주제를 다뤘습니다. Flutter와 Kotlin 학습, AI agent 비교,
+Spring AI와 Kubernetes 주변 운영 발표, 그리고 주말 시장 점검까지 축이 갈렸습니다. 그래도 기술 쪽에서
+반복된 질문은 하나였습니다.
+
+**버전을 올릴 때 무엇을 먼저 믿어야 하는가?**
+
+Spring Boot 4.1.1과 4.0.8은 같은 날 안정 릴리스로 공지됐고, Spring AI 2.0.1은 2.0.0 GA 이후
+첫 maintenance release로 여러 CVE와 tool calling 안정성 수정을 포함했습니다. PostgreSQL은 14가
+2026년 11월 12일부터 더 이상 fix를 받지 않는다고 공지했습니다. Docker는 upstream EOL 소프트웨어를
+바로 버리지 못하는 팀을 위해 Extended Lifecycle Support와 audit evidence를 설명했습니다.
+
+Spring Boot 팀은 이 흐름을 "새 버전이 나왔다"로만 보면 놓칩니다. 운영에서는 버전 변경이 세 갈래로
+나뉩니다.
+
+| 변경 유형 | 예시 | 의사결정 기준 |
+|---|---|---|
+| patch upgrade | Spring Boot 4.1.1, 4.0.8 | 기존 라인 유지, 빠른 회귀 테스트 |
+| security maintenance | Spring AI 2.0.1, PostgreSQL minor release | 취약점 영향 범위와 배포 긴급도 |
+| lifecycle migration | PostgreSQL 14 EOL, EOL image | 새 major line 검증, 예외 기간과 감사 증적 |
+
+이 세 가지를 섞으면 일정이 꼬입니다. patch upgrade는 빠르게, security maintenance는 영향 범위를
+좁혀서, lifecycle migration은 긴 호흡으로 처리해야 합니다.
+
+## 핵심 개념
+
+EOL은 "언젠가 더 이상 업데이트가 없다"는 달력 문구가 아닙니다. 장애 대응 관점에서는 **새 취약점이
+나왔을 때 누구도 공식 fix를 주지 않는 상태**입니다. 이 상태가 되면 팀은 세 가지 중 하나를 골라야 합니다.
+
+1. 지원 중인 버전으로 올립니다.
+2. vendor extended support를 계약하고 증적을 받습니다.
+3. 위험을 승인하고 별도 완화책을 둡니다.
+
+첫 번째가 가장 깔끔하지만 항상 가능한 것은 아닙니다. 데이터베이스 major upgrade는 쿼리 계획,
+extension, driver, migration, backup restore까지 건드립니다. 컨테이너 image는 base OS, OpenSSL,
+runtime, package manager가 같이 움직입니다. AI나 observability library는 network call, token 사용량,
+trace schema, 개인정보 경계가 바뀔 수 있습니다.
+
+그래서 EOL 대응의 첫 문서는 upgrade plan이 아니라 **inventory**입니다.
+
+```yaml
+component: postgresql
+currentLine: "14"
+latestPatchOnCurrentLine: "14.24"
+supportEndsAt: "2026-11-12"
+owner: platform-team
+runtimeConsumers:
+  - spring-boot-api
+  - batch-worker
+mustProve:
+  - restore rehearsal passed
+  - migration replay passed
+  - slow query baseline compared
+  - rollback window approved
+```
+
+이 정도만 있어도 논의가 달라집니다. "업그레이드 해야 하나요?"가 아니라 "어떤 증거가 있어야
+업그레이드할 수 있나요?"로 바뀝니다.
+
+## 내부 동작 원리
+
+런타임과 데이터베이스 업그레이드는 애플리케이션 코드보다 아래쪽에서 일어납니다. 그래서 단위 테스트가
+모두 통과해도 운영 위험이 사라지지 않습니다.
+
+<Mermaid title="EOL 대응 의사결정 흐름">
+{`flowchart LR
+  Inventory["버전 inventory"] --> Classify["patch, security, lifecycle 분류"]
+  Classify --> Evidence["필요 증적 정의"]
+  Evidence --> Test["회귀, 복원, 성능 테스트"]
+  Test --> Decide["upgrade, ELS, 예외 승인"]
+  Decide --> Deploy["점진 배포"]
+  Deploy --> Observe["로그, 메트릭, trace 확인"]
+  Observe --> Inventory
+`}
+</Mermaid>
+
+Spring Boot 애플리케이션을 예로 들면, 업그레이드 실패는 보통 다음 경계에서 납니다.
+
+| 경계 | 흔한 실패 | 확인할 증적 |
+|---|---|---|
+| JVM과 framework | dependency 충돌, auto-configuration 변경 | `mvn dependency:tree`, smoke test |
+| database | query plan 변경, extension 호환성 | restore rehearsal, migration replay |
+| container image | OS package 변경, TLS 인증서 경로 변경 | image digest, SBOM, vulnerability scan |
+| observability | metric 이름 변경, span cardinality 증가 | dashboard diff, sampling 설정 |
+| AI/tooling library | tool call loop, cache, prompt injection 경계 | request budget, approval log |
+
+Spring AI 2.0.1의 tool call limit이나 Redis chat memory 수정처럼 겉으로는 library patch로 보이는
+변경도 운영에서는 비용과 보안 경계입니다. "AI 기능이 더 좋아졌다"보다 "loop가 멈추는 조건이 생겼는가",
+"tenant별 memory가 섞이지 않는가"를 먼저 봐야 합니다.
+
+## 실무 설계 선택지
+
+EOL이나 보안 patch를 만났을 때 선택지는 네 가지입니다.
+
+| 선택지 | 맞는 상황 | 주의점 |
+|---|---|---|
+| 같은 major line 최신 patch | 지원이 남아 있고 변경 폭을 줄이고 싶을 때 | EOL 날짜가 가까우면 임시 조치입니다. |
+| 새 major line migration | 장기 운영 기준을 다시 잡아야 할 때 | 데이터와 query plan 검증 비용이 큽니다. |
+| vendor ELS | migration은 필요하지만 감사 일정이 먼저 올 때 | 비용, SLA, SBOM, provenance 범위를 확인해야 합니다. |
+| 위험 승인과 완화책 | 폐쇄망, 단기 sunset처럼 예외가 명확할 때 | 승인 만료일과 제거 계획이 없으면 부채가 됩니다. |
+
+여기서 중요한 원칙은 "빠른 patch"와 "큰 migration"을 한 PR에 넣지 않는 것입니다. Spring Boot patch,
+PostgreSQL minor patch, base image 교체, OpenTelemetry agent 교체를 한 번에 넣으면 장애가 났을 때
+원인을 좁힐 수 없습니다.
+
+운영 변경은 아래처럼 나누는 편이 낫습니다.
+
+```text
+1. 현재 major line의 최신 patch 적용
+2. vulnerability scan과 smoke test로 현재 위험 낮추기
+3. 별도 branch에서 major upgrade rehearsal
+4. restore, migration, 성능 baseline 비교
+5. traffic 낮은 시간에 canary 또는 read-only path부터 전환
+```
+
+## 흔한 실패 사례
+
+첫 번째 실패는 "이미지 태그만 바꾸면 끝"이라고 보는 것입니다. `postgres:14`에서 `postgres:16`으로
+바꾸는 일은 Java dependency 버전 하나를 바꾸는 것과 다릅니다. storage format, extension, backup,
+replication, client driver까지 연결됩니다.
+
+두 번째 실패는 EOL을 보안팀 문서로만 밀어 넣는 것입니다. 예외 승인 문서는 위험을 없애지 않습니다.
+예외 기간 동안 어떤 CVE를 누가 triage하고, 어떤 compensating control을 두고, 언제 제거할지까지 있어야
+운영 문서가 됩니다.
+
+세 번째 실패는 preview나 milestone을 stable 대체재로 보는 것입니다. Spring Boot 4.2.0-M1 같은
+milestone은 다음 방향을 읽는 데는 유용하지만, 운영 upgrade target은 아닙니다. 테스트 환경에서
+호환성 조사를 할 수는 있어도 production 기준 버전처럼 쓰면 안 됩니다.
+
+## 독립 실행 실습
+
+아래 실습은 저장소 안에서 바로 해 볼 수 있는 inventory 점검입니다. 실제 값을 쓰기 전에 예시 파일을
+만들고, EOL과 patch 성격을 분리해서 보는 훈련입니다.
+
+```bash
+cat > runtime-inventory.csv <<'CSV'
+name,type,current,latest,current_line_eol,owner
+spring-boot,framework,4.1.0,4.1.1,,backend
+postgresql,database,14.23,14.24,2026-11-12,platform
+node,container-runtime,18,22,2025-04-30,frontend
+opentelemetry-javaagent,observability,2.30.0,2.31.1,,platform
+CSV
+
+awk -F, 'NR == 1 { next }
+{
+  status = "patch-check"
+  if ($5 != "") status = "lifecycle-check"
+  printf "%s: %s -> %s (%s, owner=%s)\\n", $1, $3, $4, status, $6
+}' runtime-inventory.csv
+```
+
+출력에서 `patch-check`는 빠른 회귀 테스트 후보이고, `lifecycle-check`는 upgrade plan이나 ELS 같은
+별도 의사결정 후보입니다. 이 둘을 같은 회의에서 논의하더라도 같은 작업으로 묶지는 않습니다.
+
+Spring Boot 서비스라면 다음 CI 증적을 최소 단위로 잡습니다.
+
+```text
+dependency tree
+-> unit test
+-> application context boot
+-> database migration replay
+-> container vulnerability scan
+-> one request trace 확인
+```
+
+OpenTelemetry Java agent처럼 애플리케이션 밖에서 붙는 도구는 특히 마지막 단계가 중요합니다. build가
+성공해도 실제 요청 trace가 dashboard에 같은 이름과 적당한 cardinality로 들어오는지 봐야 합니다.
+
+## 이번 주 관련 글
+
+- [Spring Boot 개발자를 위한 Flutter 셋째 걸음: FutureBuilder와 비동기 데이터](/blog/posts/flutter-async-data-2026-08-25/)
+- [Spring Boot 개발자를 위한 Flutter 넷째 걸음: Form validation과 입력 상태 다루기](/blog/posts/flutter-form-validation-2026-08-26/)
+- [AI agent 비교: Grok 4.6, Codex, Claude Code, Cursor를 어떻게 고를까](/blog/posts/ai-agent-comparison-2026-08-26/)
+- [Spring Boot 개발자를 위한 Kotlin 둘째 걸음: null safety와 smart cast](/blog/posts/kotlin-null-safety-smart-cast-2026-08-27/)
+- [2026년 8월 넷째 주 IT 기술동향: AI 개발 도구 GA, EKS 인증서 회전과 EOL 대응](/blog/posts/weekly-it-trends-2026-08-25/)
+
+## 참고자료
+
+- [Spring Boot 4.1.1 available now](https://spring.io/blog/2026/08/20/spring-boot-4-1-1-available-now/)
+- [Spring Boot 4.0.8 available now](https://spring.io/blog/2026/08/20/spring-boot-4-0-8-available-now/)
+- [Spring AI 2.0.1 Available Now](https://spring.io/blog/2026/08/21/spring-ai-2-0-1-available-now/)
+- [PostgreSQL 18.6, 17.11, 16.15, 15.19, 14.24 and 19 Beta 3 Released](https://www.postgresql.org/about/news/postgresql-186-1711-1615-1519-1424-and-19-beta-3-released-3365/)
+- [PostgreSQL Versioning Policy](https://www.postgresql.org/support/versioning/)
+- [Docker Hardened Images](https://www.docker.com/products/hardened-images/)
+- [MinIO End of Life: How to Stay Patched and Audit-Ready with Docker ELS](https://www.docker.com/blog/minio-end-of-life-how-to-stay-patched-and-audit-ready-with-docker-els/)
+- [OpenTelemetry Java Instrumentation Releases](https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases)

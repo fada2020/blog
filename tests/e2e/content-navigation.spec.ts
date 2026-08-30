@@ -5,21 +5,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /토요일 주식 학습/ })
+    .getByRole("link", { name: /일요일 주식 학습/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/stock-market-rates-fx-semiconductor-2026-08-29\/$/,
+    /\/blog\/posts\/sunday-stock-rebalancing-checklist-2026-08-30\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "토요일 주식 학습: 금리와 환율이 반도체 장세를 흔드는 순서",
+    "일요일 주식 학습: 주말 리밸런싱은 예측이 아니라 노출 점검이다",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "미국 금리, 달러 원 환율, 유가, 반도체 섹터가 한국 주식시장으로 연결되는 시장 인사이트 대시보드",
+    "주말 포트폴리오 리밸런싱을 금리, 환율, 유가, 미국 지수, 한국 지수 노출로 나눠 점검하는 대시보드",
   );
 });
 
@@ -67,12 +67,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /토요일 주식 학습/,
+      name: /일요일 주식 학습/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Kotlin 넷째 걸음/,
+      name: /일요일 기술 심화/,
     }),
   ).toBeVisible();
 });
