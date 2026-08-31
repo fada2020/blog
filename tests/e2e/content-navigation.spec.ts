@@ -5,21 +5,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /일요일 주식 학습/ })
+    .getByRole("link", { name: /월요일 경제 기초/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/sunday-stock-rebalancing-checklist-2026-08-30\/$/,
+    /\/blog\/posts\/monday-money-cashflow-interest-inflation-2026-08-31\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "일요일 주식 학습: 주말 리밸런싱은 예측이 아니라 노출 점검이다",
+    "월요일 경제 기초: 월급 통장으로 금리와 물가 읽기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "주말 포트폴리오 리밸런싱을 금리, 환율, 유가, 미국 지수, 한국 지수 노출로 나눠 점검하는 대시보드",
+    "월급 통장에서 생활비, 비상금, 예금, 대출 상환, 투자 적립으로 현금흐름이 나뉘고 금리와 물가 지표가 연결되는 대시보드",
   );
 });
 
@@ -67,12 +67,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /일요일 주식 학습/,
+      name: /월요일 경제 기초/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /일요일 기술 심화/,
+      name: /Flutter 다섯째 걸음/,
     }),
   ).toBeVisible();
 });
@@ -107,14 +107,14 @@ test("카테고리와 태그로 공개 글을 탐색할 수 있다", async ({ pa
   await expect(page).toHaveURL(/\/blog\/categories\/Frontend\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Frontend 글");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 넷째 걸음/ }),
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 다섯째 걸음/ }),
   ).toBeVisible();
 
   await page.getByRole("link", { name: "#Flutter", exact: true }).first().click();
   await expect(page).toHaveURL(/\/blog\/tags\/Flutter\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("#Flutter");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 넷째 걸음/ }),
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 다섯째 걸음/ }),
   ).toBeVisible();
 });
 
@@ -146,7 +146,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("학습 글");
   await expect(
     page.getByRole("link", {
-      name: /Spring Boot 개발자를 위한 Flutter 넷째 걸음/,
+      name: /Spring Boot 개발자를 위한 Flutter 다섯째 걸음/,
     }),
   ).toBeVisible();
 

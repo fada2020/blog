@@ -5,15 +5,15 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(37);
+  expect(entries).toHaveLength(39);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "일요일 주식 학습: 주말 리밸런싱은 예측이 아니라 노출 점검이다",
+    "월요일 경제 기초: 월급 통장으로 금리와 물가 읽기",
   );
   expect(entries[0].href).toBe(
-    "/blog/posts/sunday-stock-rebalancing-checklist-2026-08-30/",
+    "/blog/posts/monday-money-cashflow-interest-inflation-2026-08-31/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });
