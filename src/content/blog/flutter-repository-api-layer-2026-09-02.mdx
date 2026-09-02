@@ -1,0 +1,423 @@
+---
+title: "Spring Boot 개발자를 위한 Flutter 일곱째 걸음: Repository와 API 계층 분리하기"
+description: "Spring Boot의 Controller, Service, Repository 경계와 비교하며 Flutter에서 화면 상태, API client, repository, JSON model을 나누는 방법을 정리합니다."
+publishedAt: 2026-09-02T08:50:00+09:00
+draft: false
+category: "Frontend"
+tags: ["Flutter", "Dart", "Spring Boot", "Repository", "HTTP"]
+kind: "learning"
+heroImage: "../../assets/blog/flutter-repository-api-layer-2026-09-02/cover.webp"
+heroImageAlt: "Flutter 화면 상태, repository, API client, JSON model이 서버 API와 분리되어 연결된 모바일 아키텍처 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 모바일 앱 학습"
+lesson: 7
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 9월 2일에 Flutter SDK archive JSON, Flutter 3.47 release note, Flutter app architecture
+> recommendations, data layer case study, networking, JSON serialization 문서와 pub.dev 패키지 정보를
+> 확인했습니다. 기준 stable SDK는 Flutter 3.47.2이고 포함된 Dart SDK는 3.13.2입니다. 예제에서 언급한
+> 주요 패키지 기준 버전은 `http` 1.6.0, `flutter_riverpod` 3.4.2, `json_serializable` 6.14.1,
+> `freezed` 4.0.1입니다. beta, dev, main channel은 안정판처럼 다루지 않았습니다.
+
+## 결론부터 말하면
+
+Flutter에서 API 호출 코드를 화면 widget 안에 직접 넣기 시작하면 빠르게 복잡해집니다. 처음에는
+`FutureBuilder` 안에서 `http.get()`을 부르는 정도로 충분해 보이지만, 로그인 token, retry, 오류 메시지,
+loading 상태, JSON 변환, 테스트 대역이 붙는 순간 화면 코드가 서버 통신 규칙까지 떠안습니다.
+
+Spring Boot 개발자에게 가장 익숙한 대응 방식은 계층 분리입니다. 다만 Flutter에서는 Controller, Service,
+Repository를 그대로 복사하기보다 **UI state, repository, API client, DTO/model 경계를 작게 나누는 것**이
+핵심입니다. 화면은 상태를 보여 주고, notifier나 view model은 사용자 동작을 상태 전이로 바꾸며, repository는
+앱이 이해하는 model을 돌려주고, API client는 HTTP와 JSON의 거친 부분을 맡습니다.
+
+이번 글은 여섯째 글의 Riverpod 앱 상태 위에 서버 API 계층을 붙이는 단계입니다.
+
+- API 호출을 widget에서 빼야 하는 이유
+- Flutter 공식 architecture 문서의 repository, service 권장안
+- Spring Boot의 Repository와 Flutter repository가 어떻게 다른가
+- 작은 예제로 HTTP, JSON, 상태 전이를 분리하는 법
+- 테스트에서 fake repository로 화면을 검증하는 기준
+
+## 이번 주 개념
+
+Flutter 공식 architecture recommendations는 data layer에서 repository pattern을 강하게 권장합니다.
+공식 data layer 문서는 data layer가 외부 API를 소비하고, 데이터를 UI에 노출하고, UI에서 발생한 업데이트 요청을
+외부 API로 보내는 책임을 가진다고 설명합니다. 또한 repository와 service는 일대일이 아니라 여러 조합이 될 수
+있습니다.
+
+작은 앱에서는 다음 네 조각이면 충분합니다.
+
+```text
+Widget
+-> 화면을 그림. ref.watch로 상태를 구독함.
+
+Controller / Notifier
+-> 사용자의 refresh, save, retry 같은 명령을 상태 전이로 바꿈.
+
+Repository
+-> 앱에서 쓰는 model 기준으로 load/save를 제공함.
+
+API client
+-> HTTP method, URL, header, status code, JSON decode를 처리함.
+```
+
+이 구조는 과한 설계가 아닙니다. 화면이 커지기 전에 서로 다른 변경 이유를 나누는 최소 경계입니다. URL이
+바뀌는 일, JSON field가 바뀌는 일, loading UI가 바뀌는 일, retry 정책이 바뀌는 일이 같은 파일을 건드리면
+모바일 앱은 유지보수가 어려워집니다.
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Spring Boot에서는 API를 만드는 쪽의 계층이 익숙합니다.
+
+```java
+@RestController
+class ProfileController {
+
+    private final ProfileService profileService;
+
+    @GetMapping("/api/me")
+    ProfileResponse me(@AuthenticationPrincipal UserPrincipal principal) {
+        return profileService.getProfile(principal.userId());
+    }
+}
+
+@Service
+class ProfileService {
+
+    private final ProfileRepository profileRepository;
+
+    ProfileResponse getProfile(Long userId) {
+        Profile profile = profileRepository.findByUserId(userId)
+            .orElseThrow(ProfileNotFoundException::new);
+        return ProfileResponse.from(profile);
+    }
+}
+```
+
+여기서 Repository는 보통 database 접근을 감춥니다. Controller는 HTTP 요청을 받고, Service는 업무 규칙을
+실행하고, Repository는 JPA나 SQL을 감춥니다.
+
+Flutter는 같은 API를 소비하는 클라이언트입니다. 그래서 repository의 방향이 조금 다릅니다. Flutter repository는
+database row가 아니라 **화면과 앱 로직이 이해할 수 있는 model**을 반환합니다. 내부에서는 HTTP API, local
+cache, secure storage, mock data를 조합할 수 있지만, 화면은 그 사실을 몰라도 됩니다.
+
+```text
+Spring Boot server
+HTTP request -> Controller -> Service -> Repository -> DB
+
+Flutter client
+User action -> Widget/Controller -> Repository -> API client -> HTTP response
+```
+
+## Flutter에서는 무엇이 다른가
+
+Flutter의 화면은 서버 코드보다 상태 변화에 더 민감합니다. API 호출은 성공 또는 실패만 있는 일이 아닙니다.
+
+- 첫 진입 loading
+- 새로고침 loading
+- 이전 data를 유지한 채 재요청
+- validation 실패
+- 인증 만료
+- 네트워크 실패
+- 서버 오류
+- 재시도
+
+이 상태를 모두 `try/catch`와 `setState()`로 화면 안에 넣으면, 화면은 점점 "작은 controller"가 됩니다. 대신
+상태 전이와 I/O를 분리하면 widget은 훨씬 단순해집니다.
+
+<Mermaid title="Flutter API 계층 분리">
+{`flowchart TD
+  View["ProfileScreen<br/>상태 표시"] --> Watch["ref.watch(profileControllerProvider)"]
+  Button["Retry button"] --> Action["ref.read(...).reload()"]
+  Watch --> Controller["ProfileController<br/>AsyncValue 상태 전이"]
+  Action --> Controller
+  Controller --> Repository["ProfileRepository<br/>앱 model 반환"]
+  Repository --> ApiClient["ProfileApiClient<br/>HTTP + JSON"]
+  ApiClient --> Server["Spring Boot API"]
+  Repository --> Model["Profile model"]
+  Model --> Controller
+`}
+</Mermaid>
+
+Spring Boot 개발자가 볼 핵심 차이는 lifecycle입니다. 서버 bean은 보통 애플리케이션 전체에서 오래 삽니다.
+Flutter provider와 notifier는 화면 tree, provider scope, cache 정책에 따라 생성되고 해제될 수 있습니다.
+그래서 singleton처럼 아무 곳에서나 전역 접근하기보다, provider를 통해 의존성을 주입하고 테스트에서 override할
+수 있게 두는 편이 안전합니다.
+
+## 최소 실행 예제
+
+먼저 화면이 직접 HTTP를 알지 않도록 model과 API client를 분리합니다.
+
+```dart
+import 'dart:convert';
+
+import 'package:http/http.dart' as http;
+
+class Profile {
+  const Profile({
+    required this.id,
+    required this.name,
+    required this.email,
+  });
+
+  final String id;
+  final String name;
+  final String email;
+
+  factory Profile.fromJson(Map<String, Object?> json) {
+    return Profile(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      email: json['email'] as String,
+    );
+  }
+}
+
+class ProfileApiClient {
+  ProfileApiClient({
+    required this.baseUri,
+    http.Client? client,
+  }) : _client = client ?? http.Client();
+
+  final Uri baseUri;
+  final http.Client _client;
+
+  Future<Profile> fetchMe(String accessToken) async {
+    final response = await _client.get(
+      baseUri.resolve('/api/me'),
+      headers: {
+        'Authorization': 'Bearer $accessToken',
+        'Accept': 'application/json',
+      },
+    );
+
+    if (response.statusCode == 401) {
+      throw const UnauthorizedException();
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ApiException(response.statusCode);
+    }
+
+    final body = jsonDecode(response.body) as Map<String, Object?>;
+    return Profile.fromJson(body);
+  }
+}
+
+class UnauthorizedException implements Exception {
+  const UnauthorizedException();
+}
+
+class ApiException implements Exception {
+  const ApiException(this.statusCode);
+
+  final int statusCode;
+}
+```
+
+작은 예제에서는 manual JSON serialization이 충분합니다. Flutter 공식 JSON 문서는 작은 prototype에서는
+`dart:convert` 기반 manual 방식이 간단하고, model이 많아지고 복잡해지면 code generation을 검토하라고
+설명합니다. Spring Boot의 Jackson처럼 런타임 reflection에 맡기는 방식이 기본값은 아닙니다.
+
+다음으로 repository가 token 조회와 API client를 묶습니다.
+
+```dart
+abstract interface class AuthTokenStore {
+  Future<String?> readAccessToken();
+}
+
+abstract interface class ProfileRepository {
+  Future<Profile> loadMe();
+}
+
+class RemoteProfileRepository implements ProfileRepository {
+  const RemoteProfileRepository({
+    required this.apiClient,
+    required this.tokenStore,
+  });
+
+  final ProfileApiClient apiClient;
+  final AuthTokenStore tokenStore;
+
+  @override
+  Future<Profile> loadMe() async {
+    final token = await tokenStore.readAccessToken();
+    if (token == null) {
+      throw const UnauthorizedException();
+    }
+
+    return apiClient.fetchMe(token);
+  }
+}
+```
+
+여기서 repository는 HTTP status code를 화면에 그대로 노출하지 않습니다. 앱이 이해하는 예외나 실패 모델로
+바꿉니다. 예를 들어 `401`은 "다시 로그인 필요"이고, `500`은 "잠시 뒤 재시도"입니다. 화면은 status code보다
+사용자 행동을 알아야 합니다.
+
+Riverpod을 쓰면 의존성 주입과 상태 전이를 다음처럼 얇게 연결할 수 있습니다.
+
+```dart
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+final profileApiClientProvider = Provider<ProfileApiClient>((ref) {
+  return ProfileApiClient(baseUri: Uri.parse('https://example.com'));
+});
+
+final authTokenStoreProvider = Provider<AuthTokenStore>((ref) {
+  throw UnimplementedError('Provide a real token store in app bootstrap.');
+});
+
+final profileRepositoryProvider = Provider<ProfileRepository>((ref) {
+  return RemoteProfileRepository(
+    apiClient: ref.watch(profileApiClientProvider),
+    tokenStore: ref.watch(authTokenStoreProvider),
+  );
+});
+
+final profileControllerProvider =
+    AsyncNotifierProvider<ProfileController, Profile>(ProfileController.new);
+
+class ProfileController extends AsyncNotifier<Profile> {
+  @override
+  Future<Profile> build() {
+    return ref.watch(profileRepositoryProvider).loadMe();
+  }
+
+  Future<void> reload() async {
+    state = const AsyncLoading();
+    state = await AsyncValue.guard(() {
+      return ref.read(profileRepositoryProvider).loadMe();
+    });
+  }
+}
+```
+
+화면은 API client를 모릅니다.
+
+```dart
+class ProfileScreen extends ConsumerWidget {
+  const ProfileScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final profileState = ref.watch(profileControllerProvider);
+
+    return profileState.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (error, stackTrace) {
+        return Center(
+          child: FilledButton(
+            onPressed: () {
+              ref.read(profileControllerProvider.notifier).reload();
+            },
+            child: const Text('다시 시도'),
+          ),
+        );
+      },
+      data: (profile) {
+        return ListTile(
+          title: Text(profile.name),
+          subtitle: Text(profile.email),
+        );
+      },
+    );
+  }
+}
+```
+
+## 대응 개념 비교
+
+| Spring Boot 관점 | Flutter 관점 | 주의할 점 |
+|---|---|---|
+| Controller | Widget 또는 route handler | 화면은 HTTP 세부사항을 몰라야 합니다. |
+| Service | Controller, Notifier, ViewModel | 사용자 동작을 상태 전이로 바꾸는 책임입니다. |
+| Repository | Repository | DB 접근이 아니라 앱 model 기준의 데이터 경계입니다. |
+| RestTemplate, WebClient | API client, `http.Client`, Dio 등 | URL, header, status code, JSON decode를 모읍니다. |
+| Jackson DTO | Dart model, manual JSON, code generation | 작은 model은 manual, 복잡한 model은 generator를 검토합니다. |
+| `@MockBean` | provider override, fake repository | widget test에서 서버 없이 상태를 검증합니다. |
+
+## 테스트에서는 HTTP가 아니라 repository를 바꿉니다
+
+화면 테스트의 목적은 실제 서버가 응답하는지 확인하는 일이 아닙니다. loading, success, error 상태에서 화면이
+맞게 보이는지 확인하는 일입니다. 그래서 widget test에서는 repository provider를 fake로 바꾸는 편이 단순합니다.
+
+```dart
+class FakeProfileRepository implements ProfileRepository {
+  const FakeProfileRepository(this.profile);
+
+  final Profile profile;
+
+  @override
+  Future<Profile> loadMe() async {
+    return profile;
+  }
+}
+
+await tester.pumpWidget(
+  ProviderScope(
+    overrides: [
+      profileRepositoryProvider.overrideWithValue(
+        const FakeProfileRepository(
+          Profile(
+            id: 'user-1',
+            name: 'Demo User',
+            email: 'demo@example.com',
+          ),
+        ),
+      ),
+    ],
+    child: const MaterialApp(home: ProfileScreen()),
+  ),
+);
+```
+
+API client는 별도 unit test에서 `http.Client`를 대체해 status code와 JSON parsing을 검증합니다. 이렇게 나누면
+"서버가 죽어서 화면 테스트가 실패했다"와 "화면의 error state가 깨졌다"를 분리할 수 있습니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫째, Flutter repository를 JPA repository처럼 얇은 CRUD wrapper로 만들기 쉽습니다. 모바일 repository는
+외부 API, local cache, token, offline policy를 앱 model로 감싸는 경계입니다. 단순 CRUD 이름만 붙이면 화면이
+다시 서버 구조에 끌려갑니다.
+
+둘째, 모든 예외를 `Exception` 하나로 던집니다. 서버에서는 Controller advice가 공통 응답으로 바꿔 주지만,
+Flutter 화면은 인증 만료, validation 실패, 서버 오류, 네트워크 끊김을 서로 다르게 보여 줘야 합니다.
+
+셋째, code generation을 너무 빨리 도입합니다. model이 2~3개인 학습 단계에서는 manual JSON이 더 잘 읽힙니다.
+반대로 API model이 많아지고 nullable, enum, nested object가 늘어나면 `json_serializable`이나 `freezed` 같은
+도구를 검토해야 합니다.
+
+넷째, provider를 전역 service locator처럼 씁니다. provider는 테스트 override와 rebuild 구독을 함께 갖는 도구입니다.
+어디서 `watch`하고 어디서 `read`하는지 기준을 분명히 둬야 합니다.
+
+## 연습 문제
+
+1. `/api/me` 응답을 읽는 `ProfileApiClient`를 만들고, `200`, `401`, `500` 응답을 각각 다른 실패로 바꿔 보세요.
+2. `ProfileRepository` interface를 만들고, 화면에서는 repository만 읽도록 바꿔 보세요.
+3. widget test에서 fake repository를 주입해 이름과 이메일이 표시되는지 확인해 보세요.
+4. `reload()` 중 기존 data를 유지하고 작은 progress indicator만 표시하는 상태 모델로 바꿔 보세요.
+5. model이 5개 이상으로 늘어났다고 가정하고 manual JSON과 `json_serializable` 중 어떤 기준으로 선택할지 적어 보세요.
+
+## 다음 글에서 볼 것
+
+다음 Flutter 글에서는 인증 결과와 navigation guard를 연결합니다. 로그인 form의 입력 상태는 local state로 두고,
+인증 성공 후 app state와 route redirect를 어떻게 묶을지 다룹니다.
+
+## 참고자료
+
+- [Flutter SDK archive](https://docs.flutter.dev/install/archive)
+- [What's new in Flutter 3.47](https://flutter.dev/blog/whats-new-in-flutter-3-47)
+- [Flutter architecture recommendations](https://docs.flutter.dev/app-architecture/recommendations)
+- [Flutter data layer case study](https://docs.flutter.dev/app-architecture/case-study/data-layer)
+- [Flutter networking](https://docs.flutter.dev/data-and-backend/networking)
+- [Flutter JSON and serialization](https://docs.flutter.dev/data-and-backend/serialization/json)
+- [http package](https://pub.dev/packages/http)
+- [flutter_riverpod package](https://pub.dev/packages/flutter_riverpod)
+- [json_serializable package](https://pub.dev/packages/json_serializable)
+- [freezed package](https://pub.dev/packages/freezed)
