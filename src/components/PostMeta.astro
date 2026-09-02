@@ -11,6 +11,7 @@ const { post } = Astro.props;
 const { category, kind, publishedAt, tags } = post.data;
 const formattedDate = new Intl.DateTimeFormat("ko-KR", {
   dateStyle: "long",
+  timeZone: "Asia/Seoul",
 }).format(publishedAt);
 ---
 
