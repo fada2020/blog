@@ -5,21 +5,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /AI agent 실전 운영/ })
+    .getByRole("link", { name: /공개 파일 다운로드 회고/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/ai-agent-harness-engineering-2026-09-02\/$/,
+    /\/blog\/posts\/public-asset-signed-url-retrospective-2026-09-03\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "AI agent 실전 운영: 모델 비교보다 harness를 먼저 설계하기",
+    "공개 파일 다운로드 회고: 영구 키와 짧은 URL을 분리하기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "여러 AI coding agent가 테스트, 승인, 비용, 평가, 롤백 단계로 연결된 엔지니어링 harness 보드",
+    "관리 콘솔의 공개 자료 키가 서버 API를 거쳐 짧게 만료되는 S3 서명 URL로 변환되는 다운로드 설계 다이어그램",
   );
 });
 
@@ -67,12 +67,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /AI agent 실전 운영/,
+      name: /공개 파일 다운로드 회고/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Flutter 일곱째 걸음/,
+      name: /Kotlin 다섯째 걸음/,
     }),
   ).toBeVisible();
 });

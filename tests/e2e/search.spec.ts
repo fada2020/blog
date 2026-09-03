@@ -5,15 +5,15 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(43);
+  expect(entries).toHaveLength(45);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "AI agent 실전 운영: 모델 비교보다 harness를 먼저 설계하기",
+    "공개 파일 다운로드 회고: 영구 키와 짧은 URL을 분리하기",
   );
   expect(entries[0].href).toBe(
-    "/blog/posts/ai-agent-harness-engineering-2026-09-02/",
+    "/blog/posts/public-asset-signed-url-retrospective-2026-09-03/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });
