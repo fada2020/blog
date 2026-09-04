@@ -1,0 +1,291 @@
+---
+title: "Spring Boot 개발자를 위한 Kotlin 여섯째 걸음: collection pipeline을 서비스 경계에 두기"
+description: "Java Stream, JPA 조회, DTO 변환 습관과 비교하며 Kotlin List, Sequence, map, filter, groupBy를 서버 코드에서 어디까지 써야 하는지 정리합니다."
+publishedAt: 2026-09-04T08:45:00+09:00
+draft: false
+category: "Backend"
+tags: ["Kotlin", "Collections", "Sequence", "Spring Boot", "Java Stream"]
+kind: "learning"
+heroImage: "../../assets/blog/kotlin-collection-sequence-pipeline-2026-09-04/cover.webp"
+heroImageAlt: "Kotlin collection pipeline이 JPA 조회, 메모리 변환, 응답 DTO 경계로 나뉘는 백엔드 학습 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 Kotlin 학습"
+lesson: 6
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 9월 4일에 Kotlin 공식 release process, Kotlin 2.4.20-RC3 EAP 문서,
+> collections overview, collection transformations, filtering, sequences, Java-to-Kotlin collections guide를 확인했습니다.
+> 기준 안정 버전은 `Kotlin 2.4.10`입니다. Kotlin 공식 release process 문서에서 `2.4.20`은 2026년 9월 예정 안정 릴리스로
+> 안내되고, 2026년 9월 2일 공개된 `2.4.20-RC3` 문서는 EAP/preview 기능을 포함하므로 이 글의 기준 기능으로 쓰지 않았습니다.
+
+## 결론부터 말하면
+
+Kotlin의 `map`, `filter`, `groupBy`, `associateBy`, `asSequence`는 Java Stream을 더 짧게 쓴 문법이 아닙니다.
+Spring Boot 서버 코드에서는 **DB가 할 일, 애플리케이션 메모리가 할 일, 응답 DTO가 할 일**을 나누는 경계 도구입니다.
+
+실무 기준은 단순합니다.
+
+- DB에서 줄일 수 있는 조건은 repository query로 먼저 줄입니다.
+- 이미 메모리에 올라온 작은 목록은 `List`의 eager collection pipeline으로 읽기 좋게 변환합니다.
+- 큰 목록에서 여러 단계 변환 뒤 일부만 필요하면 `asSequence()`를 검토합니다.
+- JPA entity를 lazy loading 상태로 pipeline에 흘려 보내지 않습니다.
+- `groupBy` 결과를 API 응답으로 바로 내보내기보다 DTO 이름을 먼저 붙입니다.
+
+## 이번 주 개념
+
+Kotlin collection API는 read-only interface와 mutable interface를 나눕니다. `List<T>`는 "변경 함수가 없는 관점"이고,
+`MutableList<T>`는 add, remove 같은 변경 함수를 가진 관점입니다. Java의 `List<T>` 하나로 읽기와 쓰기를 모두 보던 습관과
+가장 먼저 갈라지는 지점입니다.
+
+자주 쓰는 서버 코드 mapping은 다음처럼 읽습니다.
+
+| Kotlin 함수 | Java/Spring에서 떠올릴 것 | 서버 코드에서 쓰는 위치 |
+|---|---|---|
+| `map` | `stream().map()` | entity를 response DTO로 바꿀 때 |
+| `filter` | `stream().filter()` | 이미 가져온 목록에서 화면용 조건을 줄일 때 |
+| `associateBy` | `Collectors.toMap()` | id 기준 lookup map을 만들 때 |
+| `groupBy` | `Collectors.groupingBy()` | 상태, 월, 카테고리별 묶음을 만들 때 |
+| `asSequence` | lazy stream pipeline | 큰 컬렉션의 중간 목록 생성을 피할 때 |
+
+<Mermaid title="Kotlin collection pipeline 경계">
+{`flowchart TD
+  Query["Repository query"] --> Entities["작게 줄인 entity 목록"]
+  Entities --> Dto["DTO mapping"]
+  Dto --> Group["groupBy / associateBy"]
+  Group --> Response["응답 모델"]
+
+  Entities -.주의.-> Lazy["JPA lazy loading"]
+  Lazy --> NPlusOne["N+1 또는 session 경계 오류"]
+
+  Dto --> Small{"목록이 작고 즉시 필요?"}
+  Small -->|yes| List["List pipeline"]
+  Small -->|no| Sequence["asSequence 후 terminal operation"]
+`}
+</Mermaid>
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Java에서는 보통 Stream pipeline을 service 안에서 썼습니다.
+
+```java
+List<OrderResponse> responses = orders.stream()
+    .filter(order -> order.getStatus() != OrderStatus.DELETED)
+    .map(order -> new OrderResponse(order.getId(), order.getStatus(), order.getTotalPrice()))
+    .toList();
+```
+
+이 코드는 익숙하지만 두 가지를 자주 숨깁니다.
+
+첫째, `orders`가 이미 DB에서 충분히 줄어든 목록인지 모릅니다. 삭제 상태를 DB where 절로 뺄 수 있다면 service pipeline보다
+repository query가 먼저입니다.
+
+둘째, `map` 안에서 lazy association을 읽으면 DB 쿼리가 row 수만큼 늘 수 있습니다. Java Stream이든 Kotlin collection이든
+pipeline은 JPA fetch plan을 해결하지 않습니다.
+
+## Kotlin에서는 무엇이 다른가
+
+Kotlin에서는 같은 코드를 더 짧게 쓸 수 있습니다.
+
+```kotlin
+val responses = orders
+    .filter { it.status != OrderStatus.DELETED }
+    .map { order ->
+        OrderResponse(
+            id = order.id,
+            status = order.status,
+            totalPrice = order.totalPrice,
+        )
+    }
+```
+
+하지만 좋은 Kotlin 코드는 짧은 코드가 아니라 경계가 보이는 코드입니다.
+
+```kotlin
+fun findVisibleOrders(userId: Long): List<OrderResponse> {
+    val orders = orderRepository.findVisibleByUserId(userId)
+
+    return orders.map(Order::toResponse)
+}
+
+private fun Order.toResponse(): OrderResponse =
+    OrderResponse(
+        id = id,
+        status = status,
+        totalPrice = totalPrice,
+    )
+```
+
+`filter`가 사라졌습니다. 조건을 DB query 이름으로 올렸기 때문입니다. 이 편이 Spring Boot service에서 더 안전합니다.
+application memory에서 필터링해야 하는 조건은 화면 전용 조건, 권한 계산 후의 추가 조건, 외부 API와 합쳐야 생기는 조건처럼
+DB가 알 수 없는 것일 때가 많습니다.
+
+## 대응 개념 비교
+
+Kotlin collection pipeline은 Java Stream과 비슷하지만 같은 선택지는 아닙니다.
+
+| 판단 지점 | Java Stream 습관 | Kotlin에서의 기준 |
+|---|---|---|
+| 기본 pipeline | `list.stream()`을 먼저 붙임 | 작은 목록은 `list.map {}`처럼 collection 함수부터 사용 |
+| lazy 평가 | Stream은 기본 lazy | Kotlin `List.map`은 단계마다 즉시 새 collection 생성 |
+| 큰 목록 | Stream으로 중간 작업을 연결 | `asSequence()`를 명시하고 마지막에 `toList`, `firstOrNull` 같은 terminal 호출 |
+| null 처리 | `filter(Objects::nonNull)` 또는 Optional | `mapNotNull`, `firstOrNull`, Elvis 연산자로 실패 경계 명시 |
+| grouping | `Collectors.groupingBy` | `groupBy`, `associateBy`, `eachCount`를 목적별로 선택 |
+
+여기서 가장 중요한 차이는 lazy 여부입니다. Kotlin `List`의 `map`과 `filter`는 단계마다 결과 collection을 만듭니다. 코드가
+짧아도 데이터가 크고 단계가 많으면 중간 list가 생깁니다. `Sequence`는 요소를 하나씩 흘려 보내는 lazy pipeline입니다.
+
+## `Sequence`를 무조건 쓰지는 않습니다
+
+`asSequence()`는 성능 스위치처럼 보이지만, 모든 collection code의 기본값으로 두면 읽는 사람이 비용 모델을 매번 다시 계산해야
+합니다. 목록이 작고 결과 전체가 필요하면 `List` pipeline이 더 단순합니다.
+
+```kotlin
+val names = users
+    .filter { it.active }
+    .map { it.displayName }
+```
+
+반대로 큰 목록에서 여러 단계를 거친 뒤 앞의 몇 개만 필요하면 `Sequence`가 의도를 잘 드러냅니다.
+
+```kotlin
+val topEmails = users
+    .asSequence()
+    .filter { it.active }
+    .mapNotNull { it.email?.trim()?.takeIf(String::isNotBlank) }
+    .distinct()
+    .take(20)
+    .toList()
+```
+
+`take(20)`이 핵심입니다. 전체 변환 결과가 필요한 것이 아니라 앞의 20개만 필요하다는 요구가 있습니다. 이런 경우에는 lazy
+pipeline이 자연스럽습니다.
+
+## JPA entity를 pipeline 밖으로 오래 들고 가지 않습니다
+
+나쁜 예를 먼저 보겠습니다.
+
+```kotlin
+fun dashboard(userId: Long): DashboardResponse {
+    val orders = orderRepository.findByUserId(userId)
+
+    val summaries = orders
+        .filter { it.status.isOpen }
+        .map { order ->
+            OrderSummary(
+                id = order.id,
+                customerName = order.customer.name,
+                itemCount = order.items.size,
+            )
+        }
+
+    return DashboardResponse(summaries)
+}
+```
+
+`customer.name`과 `items.size`가 lazy association이면 pipeline 안에서 추가 query가 터질 수 있습니다. 이 문제는 Kotlin 문법
+문제가 아니라 fetch plan 문제입니다. 해결은 pipeline을 고치는 것이 아니라 query와 projection을 먼저 고치는 것입니다.
+
+```kotlin
+fun dashboard(userId: Long): DashboardResponse {
+    val rows = orderRepository.findOpenDashboardRows(userId)
+
+    return DashboardResponse(
+        orders = rows.map { row ->
+            OrderSummary(
+                id = row.orderId,
+                customerName = row.customerName,
+                itemCount = row.itemCount,
+            )
+        },
+    )
+}
+```
+
+Kotlin collection은 이미 안전하게 가져온 row를 응답 모델로 바꾸는 데 쓰고, 데이터 접근 전략은 repository 이름과 query로
+분리합니다.
+
+## 최소 실행 예제
+
+아래 예제는 Spring 없이도 Kotlin REPL이나 단일 파일에서 실행할 수 있습니다.
+
+```kotlin
+enum class OrderStatus { PAID, SHIPPED, CANCELLED }
+
+data class Order(
+    val id: Long,
+    val status: OrderStatus,
+    val totalPrice: Int,
+    val email: String?,
+)
+
+data class OrderCard(
+    val id: Long,
+    val label: String,
+)
+
+fun visibleCards(orders: List<Order>): List<OrderCard> =
+    orders
+        .filter { it.status != OrderStatus.CANCELLED }
+        .map { order ->
+            OrderCard(
+                id = order.id,
+                label = "${order.status}: ${order.totalPrice}",
+            )
+        }
+
+fun uniqueBuyerEmails(orders: List<Order>): List<String> =
+    orders
+        .asSequence()
+        .mapNotNull { it.email?.trim()?.lowercase()?.takeIf(String::isNotBlank) }
+        .distinct()
+        .toList()
+
+fun countByStatus(orders: List<Order>): Map<OrderStatus, Int> =
+    orders.groupingBy { it.status }.eachCount()
+
+fun main() {
+    val orders = listOf(
+        Order(1, OrderStatus.PAID, 12000, "USER@example.com "),
+        Order(2, OrderStatus.CANCELLED, 9000, null),
+        Order(3, OrderStatus.SHIPPED, 32000, "user@example.com"),
+    )
+
+    println(visibleCards(orders))
+    println(uniqueBuyerEmails(orders))
+    println(countByStatus(orders))
+}
+```
+
+여기서 `visibleCards`는 작은 list를 즉시 변환합니다. `uniqueBuyerEmails`는 정규화, null 제거, 중복 제거가 이어지므로 sequence로
+명시했습니다. `countByStatus`는 단순 집계라 `groupingBy().eachCount()`가 `groupBy().mapValues { ... }`보다 의도가 가깝습니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫째, `List`가 mutable하다고 생각합니다. Kotlin의 `List`는 read-only interface입니다. 내부 구현이 실제로 불변이라는 보장은
+아니지만, 함수 시그니처에서 호출자가 수정할 수 없다는 의도를 줍니다.
+
+둘째, `asSequence()`를 붙이면 DB 조회가 lazy가 된다고 착각합니다. repository가 이미 `List`를 반환했다면 DB 조회는 끝났습니다.
+sequence는 메모리에 있는 collection 변환 단계의 평가 방식을 바꿀 뿐입니다.
+
+셋째, `groupBy`를 바로 JSON 응답으로 내보냅니다. `Map<OrderStatus, List<OrderResponse>>`는 내부 구현에는 편하지만 API 계약으로는
+덜 친절할 수 있습니다. 공개 응답에는 `StatusGroupResponse(status, orders)`처럼 이름 있는 DTO를 두는 편이 versioning에 좋습니다.
+
+넷째, pipeline이 길수록 함수형이고 좋은 코드라고 봅니다. service의 핵심 실패 경계, transaction 경계, 외부 호출 경계는 한 줄
+chain보다 지역 변수와 함수 이름으로 드러나는 편이 낫습니다.
+
+## 연습 문제
+
+1. `Order` 목록에서 취소 주문을 제외하고, `totalPrice`가 높은 순서의 상위 5개만 `OrderCard`로 바꿔 보세요. `List`와
+   `Sequence` 중 어느 쪽이 더 읽기 좋은지 이유를 적어 봅니다.
+2. `List<Order>`를 `Map<OrderStatus, Int>`로 집계할 때 `groupBy`와 `groupingBy().eachCount()`를 각각 써 보고 결과 타입을
+   비교해 보세요.
+3. JPA entity의 `order.items.size`를 mapping 단계에서 읽는 코드가 있다면, repository projection으로 바꿀 수 있는지 query 이름을
+   먼저 써 보세요.
+
+Kotlin collection pipeline은 service 코드를 압축하는 도구가 아닙니다. Spring Boot 서버에서는 데이터 접근, 메모리 변환, 응답
+계약을 분리하는 이름 붙이기 도구로 쓰는 편이 오래 버팁니다.

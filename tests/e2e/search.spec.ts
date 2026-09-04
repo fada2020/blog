@@ -5,15 +5,13 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(45);
+  expect(entries).toHaveLength(47);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
-  expect(entries[0].title).toBe(
-    "공개 파일 다운로드 회고: 영구 키와 짧은 URL을 분리하기",
-  );
+  expect(entries[0].title).toBe("24개월 아이 케어: 부모급여 이후 첫 주말을 가볍게 넘기기");
   expect(entries[0].href).toBe(
-    "/blog/posts/public-asset-signed-url-retrospective-2026-09-03/",
+    "/blog/posts/toddler-24-month-weekend-transition-2026-09-04/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });

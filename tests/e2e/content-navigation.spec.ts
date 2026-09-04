@@ -5,21 +5,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /공개 파일 다운로드 회고/ })
+    .getByRole("link", { name: /24개월 아이 케어/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/public-asset-signed-url-retrospective-2026-09-03\/$/,
+    /\/blog\/posts\/toddler-24-month-weekend-transition-2026-09-04\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "공개 파일 다운로드 회고: 영구 키와 짧은 URL을 분리하기",
+    "24개월 아이 케어: 부모급여 이후 첫 주말을 가볍게 넘기기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "관리 콘솔의 공개 자료 키가 서버 API를 거쳐 짧게 만료되는 S3 서명 URL로 변환되는 다운로드 설계 다이어그램",
+    "24개월 전후 아이의 부모급여 이후 지원 제도, 건강 체크, 실내외 주말 동선을 나누어 점검하는 육아 플랜 다이어그램",
   );
 });
 
@@ -67,12 +67,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /공개 파일 다운로드 회고/,
+      name: /24개월 아이 케어/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Kotlin 다섯째 걸음/,
+      name: /Kotlin 여섯째 걸음/,
     }),
   ).toBeVisible();
 });
