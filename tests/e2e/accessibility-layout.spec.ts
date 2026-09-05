@@ -95,13 +95,17 @@ async function getForegroundAndBackground(target: Locator) {
   });
 }
 
+async function gotoDomReady(page: Page, path: string) {
+  await page.goto(path, { waitUntil: "domcontentloaded" });
+}
+
 for (const viewport of viewports) {
   for (const route of pages) {
     test(`${route.name} ${viewport.name} 화면의 접근성과 레이아웃을 유지한다`, async ({
       page,
     }) => {
       await page.setViewportSize(viewport);
-      await page.goto(route.path);
+      await gotoDomReady(page, route.path);
 
       await expect(page.locator("h1")).toHaveCount(1);
       await expectAccessibleNames(page);
@@ -128,19 +132,19 @@ for (const viewport of viewports) {
 
 test("홈의 주요 링크와 테마 버튼에 키보드 초점이 표시된다", async ({ page }) => {
   await page.setViewportSize(viewports[2]);
-  await page.goto("/blog/");
+  await gotoDomReady(page, "/blog/");
 
   await expectKeyboardFocusOutline(page, page.getByRole("link", { name: "Field Notes" }));
   await expectKeyboardFocusOutline(
     page,
-    page.getByRole("link", { name: /24개월 아이 케어/ }),
+    page.getByRole("link", { name: /토요일 주식 학습/ }),
   );
   await expectKeyboardFocusOutline(page, page.getByRole("button", { name: "테마 전환" }));
 });
 
 test("글의 주요 링크와 테마 버튼에 키보드 초점이 표시된다", async ({ page }) => {
   await page.setViewportSize(viewports[2]);
-  await page.goto("/blog/posts/hello-astro/");
+  await gotoDomReady(page, "/blog/posts/hello-astro/");
 
   await expectKeyboardFocusOutline(page, page.getByRole("link", { name: "Field Notes" }));
   await expectKeyboardFocusOutline(page, page.getByRole("link", { name: "Tooling" }).first());
@@ -151,7 +155,7 @@ test("검색의 주요 링크, 입력창과 테마 버튼에 키보드 초점이
   page,
 }) => {
   await page.setViewportSize(viewports[2]);
-  await page.goto("/blog/search/");
+  await gotoDomReady(page, "/blog/search/");
 
   await expectKeyboardFocusOutline(page, page.getByRole("link", { name: "Field Notes" }));
   await expectKeyboardFocusOutline(page, page.getByRole("searchbox", { name: "검색어" }));
@@ -160,7 +164,7 @@ test("검색의 주요 링크, 입력창과 테마 버튼에 키보드 초점이
 
 test("모바일 메뉴를 키보드로 열고 닫으며 초점을 표시한다", async ({ page }) => {
   await page.setViewportSize(viewports[0]);
-  await page.goto("/blog/");
+  await gotoDomReady(page, "/blog/");
 
   const menu = page.getByRole("button", { name: "메뉴 열기" });
   await expectKeyboardFocusOutline(page, menu);
@@ -177,7 +181,7 @@ test("모바일 메뉴를 키보드로 열고 닫으며 초점을 표시한다",
 
 test("긴 글 콘텐츠와 Mermaid가 모바일 본문을 넘지 않는다", async ({ page }) => {
   await page.setViewportSize(viewports[0]);
-  await page.goto("/blog/posts/hello-astro/");
+  await gotoDomReady(page, "/blog/posts/hello-astro/");
 
   const overflowingElements = await page.locator("main *").evaluateAll((elements) =>
     elements
@@ -200,7 +204,7 @@ test("비교 표는 구분선과 헤더를 표시하고 모바일에서 가로 �
   page,
 }) => {
   await page.setViewportSize(viewports[0]);
-  await page.goto("/blog/posts/nextjs-first-step/");
+  await gotoDomReady(page, "/blog/posts/nextjs-first-step/");
 
   const table = page.getByRole("table");
   const styles = await table.evaluate((element) => {
@@ -229,7 +233,7 @@ test("데스크톱 비교 표는 본문 폭에 맞고 내용에 따라 열 너�
   page,
 }) => {
   await page.setViewportSize(viewports[2]);
-  await page.goto("/blog/posts/nextjs-first-step/");
+  await gotoDomReady(page, "/blog/posts/nextjs-first-step/");
 
   const layout = await page.getByRole("table").evaluate((table) => {
     const body = table.closest(".article-body")!;
@@ -258,7 +262,7 @@ test("데스크톱 비교 표는 본문 폭에 맞고 내용에 따라 열 너�
 
 test("코드 블록은 충분한 내부 여백과 가로 스크롤을 제공한다", async ({ page }) => {
   await page.setViewportSize(viewports[0]);
-  await page.goto("/blog/posts/nextjs-first-step/");
+  await gotoDomReady(page, "/blog/posts/nextjs-first-step/");
 
   const styles = await page.locator(".article-body pre").first().evaluate((element) => {
     const style = getComputedStyle(element);
@@ -283,7 +287,7 @@ test("모바일 글 제목은 한 글자 줄 없이 컨테이너 안에서 렌�
   page,
 }) => {
   await page.setViewportSize(viewports[0]);
-  await page.goto("/blog/posts/hello-astro/");
+  await gotoDomReady(page, "/blog/posts/hello-astro/");
 
   const layout = await page.locator("h1").evaluate((heading) => {
     const text = heading.textContent ?? "";
@@ -319,7 +323,7 @@ test("데스크톱 대표 글 제목은 마지막 한 글자만 다음 줄로 �
   page,
 }) => {
   await page.setViewportSize(viewports[2]);
-  await page.goto("/blog/");
+  await gotoDomReady(page, "/blog/");
 
   const layout = await page.locator("#featured-title").evaluate((heading) => {
     const walker = document.createTreeWalker(heading, NodeFilter.SHOW_TEXT);
@@ -353,7 +357,7 @@ test("데스크톱 대표 글 제목은 마지막 한 글자만 다음 줄로 �
 
 test("모바일 홈의 로드맵은 한 열로 세로 배치된다", async ({ page }) => {
   await page.setViewportSize(viewports[0]);
-  await page.goto("/blog/");
+  await gotoDomReady(page, "/blog/");
 
   const roadmap = page.getByRole("list", { name: "학습 순서" });
   await expect(roadmap).toBeVisible();
@@ -376,7 +380,7 @@ test("모바일 홈의 로드맵은 한 열로 세로 배치된다", async ({ pa
 
 test("홈 대표 글과 관심 분야는 반응형 열 수를 유지한다", async ({ page }) => {
   await page.setViewportSize(viewports[1]);
-  await page.goto("/blog/");
+  await gotoDomReady(page, "/blog/");
 
   const tabletLayout = await page.evaluate(() => {
     const columnsFor = (selector: string) => {
@@ -406,7 +410,7 @@ test("홈 대표 글과 관심 분야는 반응형 열 수를 유지한다", asy
   expect(tabletLayout.topicColumns).toBe(2);
 
   await page.setViewportSize(viewports[2]);
-  await page.goto("/blog/");
+  await gotoDomReady(page, "/blog/");
 
   const desktopLayout = await page.evaluate(() => {
     const columnsFor = (selector: string) => {
@@ -447,7 +451,7 @@ for (const theme of ["light", "dark"] as const) {
     }, theme);
 
     for (const route of pages) {
-      await page.goto(route.path);
+      await gotoDomReady(page, route.path);
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
 
       const targets = [

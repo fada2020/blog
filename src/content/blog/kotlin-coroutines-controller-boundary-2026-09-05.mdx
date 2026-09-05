@@ -1,0 +1,252 @@
+---
+title: "Spring Boot 개발자를 위한 Kotlin 일곱째 걸음: suspend를 컨트롤러 경계에 두기"
+description: "Java Future, Reactor, Spring MVC 습관과 비교하며 Kotlin coroutine, suspend function, Flow를 서버 API 경계에서 어떻게 읽어야 하는지 정리합니다."
+publishedAt: 2026-09-05T08:55:00+09:00
+draft: false
+category: "Backend"
+tags: ["Kotlin", "Coroutines", "Spring Boot", "WebFlux", "Reactor"]
+kind: "learning"
+heroImage: "../../assets/blog/kotlin-coroutines-controller-boundary-2026-09-05/cover.webp"
+heroImageAlt: "Kotlin suspend controller가 Spring 요청, service, 외부 API 호출, Flow streaming 경계로 나뉘는 백엔드 학습 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 Kotlin 학습"
+lesson: 7
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 9월 5일에 Kotlin release process, Kotlin coroutines guide, kotlinx.coroutines API,
+> Spring Framework coroutines reference를 확인했습니다. 기준 안정 버전은 `Kotlin 2.4.10`이고,
+> `kotlinx.coroutines` API 문서 기준 버전은 `1.11.0`입니다. Kotlin 공식 release process에서
+> `2.4.20`은 2026년 9월 예정 릴리스로 표시되어 있어 이 글의 안정 기준으로 쓰지 않았습니다.
+
+## 결론부터 말하면
+
+Kotlin의 `suspend`는 "비동기를 붙이는 키워드"가 아닙니다. Spring Boot 서버에서는 **요청을 받는 controller,
+I/O를 수행하는 service, 여러 값을 흘려 보내는 streaming 응답**의 경계를 명확히 하는 타입 신호입니다.
+
+Java 개발자가 처음 Kotlin coroutine을 볼 때 기준은 단순합니다.
+
+- `suspend fun`은 `CompletableFuture<T>`나 `Mono<T>`처럼 값 하나를 기다리는 경계로 읽습니다.
+- `Flow<T>`는 `Flux<T>`처럼 여러 값을 순서대로 흘려 보내는 경계로 읽습니다.
+- `async`는 병렬 실행이 필요한 좁은 블록 안에서만 씁니다.
+- controller에서 thread를 직접 관리하거나 `runBlocking`으로 감싸지 않습니다.
+- DB, HTTP client, transaction, tracing이 coroutine context를 실제로 지원하는지 따로 확인합니다.
+
+## 이번 주 개념
+
+Kotlin coroutine은 실행을 잠깐 멈췄다가 다시 이어 갈 수 있는 계산입니다. Kotlin 표준 라이브러리는 낮은 수준의 기반만
+제공하고, 실제 서버 코드에서는 JetBrains의 `kotlinx.coroutines`와 Spring의 coroutine adapter를 함께 씁니다.
+
+Spring Framework 문서는 coroutine 지원 범위를 명확히 나눕니다. Spring MVC와 WebFlux의 annotated `@Controller`에서
+`Deferred`, `Flow`, suspending function return value를 지원하고, WebFlux client와 transaction 연산에도 coroutine
+확장을 제공합니다.
+
+<Mermaid title="Spring 요청에서 coroutine 경계가 보이는 위치">
+{`flowchart TD
+  Request["HTTP request"] --> Controller["suspend controller"]
+  Controller --> Service["suspend service"]
+  Service --> One["값 하나: suspend fun"]
+  Service --> Many["여러 값: Flow"]
+  Service --> External["외부 HTTP 또는 DB I/O"]
+  External --> Context["coroutine context"]
+  Context --> Response["response DTO 또는 streaming response"]
+
+  Controller -.금지.-> Blocking["runBlocking으로 감싸기"]
+  Blocking --> Starve["thread 고갈과 timeout"]
+`}
+</Mermaid>
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Java에서는 비동기 경계를 보통 세 가지로 표현했습니다.
+
+| Java/Spring 습관 | 의미 | 코드가 커질 때 생기는 문제 |
+|---|---|---|
+| `CompletableFuture<T>` | 나중에 값 하나가 온다 | callback과 예외 처리가 흩어진다 |
+| `Mono<T>` | reactive stream의 값 하나 | operator chain이 길어지면 흐름을 읽기 어렵다 |
+| `Flux<T>` | 여러 값을 streaming한다 | backpressure와 transaction 경계를 따로 이해해야 한다 |
+
+예를 들어 Reactor 기반 WebFlux controller는 다음처럼 생깁니다.
+
+```java
+@GetMapping("/orders/{id}")
+public Mono<OrderResponse> findOrder(@PathVariable long id) {
+    return orderClient.find(id)
+        .map(order -> new OrderResponse(order.id(), order.status()));
+}
+```
+
+값 하나를 돌려주는 API라면 `Mono<T>`가 자연스럽습니다. 하지만 service 호출이 여러 단계로 늘어나면 "순서대로 실행되는
+업무 로직"보다 "operator chain을 해석하는 코드"가 먼저 보일 때가 있습니다.
+
+## Kotlin에서는 무엇이 다른가
+
+Kotlin은 값 하나를 기다리는 경계를 `suspend fun`으로 표현합니다.
+
+```kotlin
+@GetMapping("/orders/{id}")
+suspend fun findOrder(@PathVariable id: Long): OrderResponse {
+    val order = orderClient.find(id)
+    return OrderResponse(
+        id = order.id,
+        status = order.status,
+    )
+}
+```
+
+이 코드는 동기 코드처럼 보이지만, `orderClient.find(id)`가 suspending function이면 thread를 점유한 채 기다리는 모델이
+아닙니다. 중요한 점은 "짧아졌다"가 아니라 **비동기 경계가 함수 시그니처에 올라왔다**는 것입니다.
+
+Spring Framework 문서는 `Mono<T>`가 `suspend fun handler(): T` 또는 빈 값 가능성을 드러내는 `T?`로 대응될 수 있고,
+`Flux<T>`는 `Flow<T>`로 대응될 수 있다고 설명합니다. 이 기준을 알면 Java 코드를 Kotlin으로 바꿀 때 반환 타입부터
+정리할 수 있습니다.
+
+## 대응 개념 비교
+
+| 요구사항 | Java/Reactor에서 떠올릴 것 | Kotlin coroutine에서의 표현 |
+|---|---|---|
+| 값 하나를 조회한다 | `Mono<OrderResponse>` | `suspend fun find(): OrderResponse` |
+| 값이 없을 수 있다 | `Mono.empty()` 또는 `Optional<T>` | `T?` 또는 도메인 결과 타입 |
+| 여러 값을 흘려 보낸다 | `Flux<Event>` | `Flow<Event>` |
+| 독립 I/O 두 개를 병렬로 부른다 | `Mono.zip` | `coroutineScope { async { ... } }` |
+| transaction 안에서 suspending call을 묶는다 | reactive transaction | `TransactionalOperator.executeAndAwait` |
+
+여기서 초보자가 놓치기 쉬운 지점은 `T?`입니다. Java에서는 값이 없는 상황을 `Optional`, `null`, `Mono.empty`, 예외 중
+하나로 흩어 표현했습니다. Kotlin에서는 controller 반환 타입과 service 반환 타입에서 nullable 여부를 먼저 드러낼 수
+있습니다.
+
+## 최소 실행 예제
+
+아래 코드는 Spring 없이도 coroutine 흐름을 볼 수 있는 작은 예제입니다. 핵심은 `suspend` 함수가 순서대로 읽히고,
+병렬이 필요한 부분에서만 `async`를 쓴다는 점입니다.
+
+```kotlin
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+
+data class Order(val id: Long, val total: Int)
+data class Payment(val orderId: Long, val approved: Boolean)
+data class OrderSummary(val id: Long, val total: Int, val paid: Boolean)
+
+suspend fun findOrder(id: Long): Order {
+    delay(50)
+    return Order(id = id, total = 12000)
+}
+
+suspend fun findPayment(orderId: Long): Payment {
+    delay(50)
+    return Payment(orderId = orderId, approved = true)
+}
+
+suspend fun loadSummary(id: Long): OrderSummary = coroutineScope {
+    val order = async { findOrder(id) }
+    val payment = async { findPayment(id) }
+
+    OrderSummary(
+        id = id,
+        total = order.await().total,
+        paid = payment.await().approved,
+    )
+}
+
+fun main() = runBlocking {
+    println(loadSummary(7))
+}
+```
+
+이 예제의 `runBlocking`은 `main` 함수에서 데모를 실행하기 위한 장치입니다. Spring controller 안에서는 직접 쓰지 않는다고
+기억하는 편이 안전합니다. controller는 이미 Spring이 호출 경계와 adapter를 관리합니다.
+
+## controller에서는 작게, service에서는 의도를 보이게
+
+Kotlin controller에 모든 coroutine 코드를 몰아넣으면 Java controller에 모든 business logic을 넣는 것과 같습니다.
+controller는 HTTP 모양을 받아 service 호출로 넘기고, service는 I/O 순서와 병렬 실행 의도를 드러내는 편이 낫습니다.
+
+```kotlin
+@RestController
+class OrderController(
+    private val orderService: OrderService,
+) {
+    @GetMapping("/orders/{id}/summary")
+    suspend fun summary(@PathVariable id: Long): OrderSummaryResponse =
+        orderService.summary(id).toResponse()
+}
+
+class OrderService(
+    private val orderClient: OrderClient,
+    private val paymentClient: PaymentClient,
+) {
+    suspend fun summary(id: Long): OrderSummary = coroutineScope {
+        val order = async { orderClient.find(id) }
+        val payment = async { paymentClient.findByOrderId(id) }
+
+        OrderSummary(
+            id = id,
+            total = order.await().total,
+            paid = payment.await().approved,
+        )
+    }
+}
+```
+
+`async`가 항상 빠른 코드를 만드는 것은 아닙니다. 서로 의존하지 않는 I/O 두 개를 동시에 기다릴 때 의미가 있습니다.
+첫 번째 결과가 두 번째 요청의 입력이 되는 흐름이라면 순차 호출이 맞습니다.
+
+## Flow는 List가 아니라 시간축이 있는 응답입니다
+
+`Flow<T>`를 `List<T>`의 다른 이름처럼 쓰면 설계가 흐려집니다. 이미 메모리에 모든 값을 갖고 있고 응답도 한 번에 내려줄
+것이라면 `List<T>`가 더 솔직합니다. `Flow<T>`는 값이 시간 순서로 나오거나, streaming 처리와 backpressure를 고려해야 할 때
+의미가 있습니다.
+
+```kotlin
+fun orderEvents(orderId: Long): Flow<OrderEvent> =
+    eventRepository.streamByOrderId(orderId)
+        .map { event ->
+            OrderEvent(
+                type = event.type,
+                occurredAt = event.occurredAt,
+            )
+        }
+```
+
+Spring 문서는 `Flow`가 push-based이고, backpressure가 suspending function을 통해 구현된다고 설명합니다. 이 말은
+"그냥 List보다 고급"이라는 뜻이 아니라, consumer가 처리할 수 있는 속도와 producer가 내보내는 속도를 같이 생각해야 한다는
+뜻입니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫째, `suspend`는 thread pool 크기를 자동으로 해결하지 않습니다. blocking JDBC, 오래 걸리는 파일 I/O, CPU heavy 작업을
+그대로 넣으면 여전히 병목이 생깁니다.
+
+둘째, `runBlocking`은 controller나 service의 만능 adapter가 아닙니다. 기존 blocking API를 잠깐 연결해야 한다면 호출
+위치와 dispatcher를 명확히 보고, 가능하면 coroutine을 지원하는 client나 Spring adapter를 사용합니다.
+
+셋째, `async`를 많이 쓰면 더 빠르다고 생각하기 쉽습니다. 병렬로 실행할 일이 없거나, 실패와 cancellation을 함께 설계하지
+않으면 코드만 복잡해집니다.
+
+넷째, Reactor를 전부 버려야 하는 것은 아닙니다. Spring WebFlux, RSocket, reactive transaction, observability context는
+여전히 Reactor와 만나는 부분이 있습니다. Kotlin coroutine은 그 위에 더 순차적으로 읽히는 API 경계를 얹는 선택지입니다.
+
+## 연습 문제
+
+아래 세 문제를 직접 바꿔 보세요.
+
+1. `Mono<UserResponse>`를 반환하는 WebFlux controller를 `suspend fun`으로 바꿔 보고, 값이 없을 때 `UserResponse?`와
+   예외 중 어느 쪽이 API 계약에 맞는지 적습니다.
+2. 독립적인 외부 API 두 개를 순차 호출하는 service를 `coroutineScope`와 `async`로 바꾸고, 실패 시 어느 요청까지 취소되어야
+   하는지 정리합니다.
+3. `List<Event>`로 한 번에 응답하던 API가 실시간 진행 상황을 내려줘야 한다면 `Flow<Event>`가 맞는지, 단순 polling API가
+   더 단순한지 비교합니다.
+
+## 참고자료
+
+- [Kotlin - Kotlin release process](https://kotlinlang.org/docs/releases.html)
+- [Kotlin - Coroutines guide](https://kotlinlang.org/docs/coroutines-guide.html)
+- [Kotlin - kotlinx.coroutines API reference](https://kotlinlang.org/api/kotlinx.coroutines/)
+- [Spring Framework - Coroutines](https://docs.spring.io/spring-framework/reference/languages/kotlin/coroutines.html)

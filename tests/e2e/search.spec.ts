@@ -5,13 +5,15 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(47);
+  expect(entries).toHaveLength(49);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
-  expect(entries[0].title).toBe("24개월 아이 케어: 부모급여 이후 첫 주말을 가볍게 넘기기");
+  expect(entries[0].title).toBe(
+    "토요일 주식 학습: 고용 지표 뒤 금리와 한국 반도체를 같이 읽기",
+  );
   expect(entries[0].href).toBe(
-    "/blog/posts/toddler-24-month-weekend-transition-2026-09-04/",
+    "/blog/posts/stock-jobs-yields-korea-chip-risk-2026-09-05/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });

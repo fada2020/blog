@@ -5,21 +5,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /24개월 아이 케어/ })
+    .getByRole("link", { name: /토요일 주식 학습/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/toddler-24-month-weekend-transition-2026-09-04\/$/,
+    /\/blog\/posts\/stock-jobs-yields-korea-chip-risk-2026-09-05\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "24개월 아이 케어: 부모급여 이후 첫 주말을 가볍게 넘기기",
+    "토요일 주식 학습: 고용 지표 뒤 금리와 한국 반도체를 같이 읽기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "24개월 전후 아이의 부모급여 이후 지원 제도, 건강 체크, 실내외 주말 동선을 나누어 점검하는 육아 플랜 다이어그램",
+    "미국 고용 지표, 국채금리, 달러 원 환율, 유가, 한국 반도체 섹터가 한 시장 점검판에 연결된 대시보드",
   );
 });
 
@@ -67,12 +67,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /24개월 아이 케어/,
+      name: /토요일 주식 학습/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Kotlin 여섯째 걸음/,
+      name: /Kotlin 일곱째 걸음/,
     }),
   ).toBeVisible();
 });

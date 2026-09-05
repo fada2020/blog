@@ -1,7 +1,11 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function gotoDomReady(page: Page, path: string) {
+  await page.goto(path, { waitUntil: "domcontentloaded" });
+}
 
 test("대표 이미지와 본문 이미지에 대체 텍스트가 있다", async ({ page }) => {
-  await page.goto("/blog/posts/hello-astro/");
+  await gotoDomReady(page, "/blog/posts/hello-astro/");
 
   const images = page.locator("main img");
   await expect(images).toHaveCount(2);
@@ -18,7 +22,7 @@ test("대표 이미지와 본문 이미지에 대체 텍스트가 있다", async
 test("Mermaid 다이어그램이 접근 가능한 그림으로 렌더링된다", async ({
   page,
 }) => {
-  await page.goto("/blog/posts/hello-astro/");
+  await gotoDomReady(page, "/blog/posts/hello-astro/");
 
   const diagram = page.getByRole("img", { name: "Astro 글 발행 흐름" });
   await expect(diagram).toBeVisible();
@@ -30,7 +34,7 @@ test("Mermaid는 모바일 다크 모드에서도 보이고 넘치지 않는다"
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ colorScheme: "dark" });
-  await page.goto("/blog/posts/hello-astro/");
+  await gotoDomReady(page, "/blog/posts/hello-astro/");
 
   const diagram = page.getByRole("img", { name: "Astro 글 발행 흐름" });
   await expect(diagram.locator("svg")).toBeVisible();
@@ -45,7 +49,7 @@ test("Mermaid는 모바일 다크 모드에서도 보이고 넘치지 않는다"
 test("테마를 전환하면 Mermaid를 새 테마로 다시 렌더링한다", async ({
   page,
 }) => {
-  await page.goto("/blog/posts/hello-astro/");
+  await gotoDomReady(page, "/blog/posts/hello-astro/");
 
   const diagram = page.getByRole("img", { name: "Astro 글 발행 흐름" });
   const svg = diagram.locator("svg");
@@ -78,7 +82,7 @@ test("Mermaid 클라이언트 코드는 사용하는 글에서만 로드한다",
       homeScripts.push(request.url());
     }
   });
-  await page.goto("/blog/");
+  await gotoDomReady(page, "/blog/");
   expect(homeScripts.some((url) => url.includes("mermaid"))).toBe(false);
 
   const articleScripts: string[] = [];
@@ -88,6 +92,6 @@ test("Mermaid 클라이언트 코드는 사용하는 글에서만 로드한다",
       articleScripts.push(request.url());
     }
   });
-  await page.goto("/blog/posts/hello-astro/");
+  await gotoDomReady(page, "/blog/posts/hello-astro/");
   expect(articleScripts.some((url) => url.includes("mermaid"))).toBe(true);
 });
