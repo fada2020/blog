@@ -1,30 +1,34 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function gotoDomReady(page: Page, path: string) {
+  await page.goto(path, { waitUntil: "domcontentloaded" });
+}
 
 test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
-  await page.goto("/blog/");
+  await gotoDomReady(page, "/blog/");
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /토요일 주식 학습/ })
+    .getByRole("link", { name: /일요일 주식 학습/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/stock-jobs-yields-korea-chip-risk-2026-09-05\/$/,
+    /\/blog\/posts\/sunday-market-watchlist-risk-2026-09-06\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "토요일 주식 학습: 고용 지표 뒤 금리와 한국 반도체를 같이 읽기",
+    "일요일 주식 학습: 다음 주 관찰 목록은 매수 후보가 아니라 리스크 지도다",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "미국 고용 지표, 국채금리, 달러 원 환율, 유가, 한국 반도체 섹터가 한 시장 점검판에 연결된 대시보드",
+    "미국 고용, 국채금리, 유가, 달러 원 환율, 한국 수출주 노출을 다음 주 관찰 목록으로 정리한 시장 리스크 지도",
   );
 });
 
 test("홈은 대표 글과 매거진 편집 섹션을 표시한다", async ({ page }) => {
-  await page.goto("/blog/");
+  await gotoDomReady(page, "/blog/");
 
   await expect(page.getByRole("region", { name: "대표 글" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "관심 분야" })).toBeVisible();
@@ -37,7 +41,7 @@ test("홈은 대표 글과 매거진 편집 섹션을 표시한다", async ({ pa
 });
 
 test("홈은 관심 분야 링크 계약과 현재 학습 단계 표식을 유지한다", async ({ page }) => {
-  await page.goto("/blog/");
+  await gotoDomReady(page, "/blog/");
 
   const frontendLink = page
     .getByRole("region", { name: "관심 분야" })
@@ -63,22 +67,22 @@ test("홈은 관심 분야 링크 계약과 현재 학습 단계 표식을 유�
 });
 
 test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표시한다", async ({ page }) => {
-  await page.goto("/blog/");
+  await gotoDomReady(page, "/blog/");
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /토요일 주식 학습/,
+      name: /일요일 주식 학습/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Kotlin 일곱째 걸음/,
+      name: /Kubernetes 1.37/,
     }),
   ).toBeVisible();
 });
 
 test("홈 최신 글은 페이지네이션으로 다음 페이지를 탐색할 수 있다", async ({ page }) => {
-  await page.goto("/blog/");
+  await gotoDomReady(page, "/blog/");
 
   const pagination = page.getByRole("navigation", { name: "최신 글 페이지 이동" });
   await expect(pagination).toBeVisible();
@@ -101,7 +105,7 @@ test("홈 최신 글은 페이지네이션으로 다음 페이지를 탐색할 �
 });
 
 test("카테고리와 태그로 공개 글을 탐색할 수 있다", async ({ page }) => {
-  await page.goto("/blog/");
+  await gotoDomReady(page, "/blog/");
 
   await page.getByRole("link", { name: "Frontend", exact: true }).first().click();
   await expect(page).toHaveURL(/\/blog\/categories\/Frontend\/$/);
@@ -119,7 +123,7 @@ test("카테고리와 태그로 공개 글을 탐색할 수 있다", async ({ pa
 });
 
 test("글이 많은 태그는 페이지네이션으로 다음 페이지를 제공한다", async ({ page }) => {
-  await page.goto("/blog/tags/Spring%20Boot/");
+  await gotoDomReady(page, "/blog/tags/Spring%20Boot/");
 
   const pagination = page.getByRole("navigation", { name: "#Spring Boot 페이지 이동" });
   await expect(pagination).toBeVisible();
@@ -138,7 +142,7 @@ test("글이 많은 태그는 페이지네이션으로 다음 페이지를 제�
 });
 
 test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page }) => {
-  await page.goto("/blog/posts/nextjs-first-step/");
+  await gotoDomReady(page, "/blog/posts/nextjs-first-step/");
 
   await page.getByRole("link", { name: "학습", exact: true }).click();
 

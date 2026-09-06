@@ -1,19 +1,23 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function gotoDomReady(page: Page, path: string) {
+  await page.goto(path, { waitUntil: "domcontentloaded" });
+}
 
 test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({ request }) => {
   const response = await request.get("/blog/search-index.json");
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(49);
+  expect(entries).toHaveLength(51);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "토요일 주식 학습: 고용 지표 뒤 금리와 한국 반도체를 같이 읽기",
+    "일요일 주식 학습: 다음 주 관찰 목록은 매수 후보가 아니라 리스크 지도다",
   );
   expect(entries[0].href).toBe(
-    "/blog/posts/stock-jobs-yields-korea-chip-risk-2026-09-05/",
+    "/blog/posts/sunday-market-watchlist-risk-2026-09-06/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });
@@ -21,7 +25,7 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
 test("빈 검색어는 안내를 표시하고 공개 글 전체를 노출하지 않는다", async ({
   page,
 }) => {
-  await page.goto("/blog/search/");
+  await gotoDomReady(page, "/blog/search/");
 
   await expect(page.getByLabel("검색어")).toBeVisible();
   await expect(page.getByRole("status")).toHaveText(
@@ -33,7 +37,7 @@ test("빈 검색어는 안내를 표시하고 공개 글 전체를 노출하지 
 });
 
 test("제목과 태그를 검색하고 결과 변경을 알린다", async ({ page }) => {
-  await page.goto("/blog/search/");
+  await gotoDomReady(page, "/blog/search/");
   const input = page.getByLabel("검색어");
 
   await input.fill("  STATIC   site ");
@@ -61,7 +65,7 @@ test("검색 인덱스 응답 전에 입력한 검색어도 준비 직후 처리
     await route.continue();
   });
 
-  await page.goto("/blog/search/");
+  await gotoDomReady(page, "/blog/search/");
   await page.getByLabel("검색어").fill("Astro");
   releaseIndex();
 
@@ -73,14 +77,14 @@ test("검색 인덱스 응답 전에 입력한 검색어도 준비 직후 처리
 
 test("데스크톱과 모바일 헤더에서 검색 페이지로 이동한다", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto("/blog/");
+  await gotoDomReady(page, "/blog/");
   await page.getByRole("navigation", { name: "주요 메뉴" }).getByRole("link", {
     name: "검색",
   }).click();
   await expect(page).toHaveURL(/\/blog\/search\/$/);
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/blog/");
+  await gotoDomReady(page, "/blog/");
   await page.getByRole("button", { name: "메뉴 열기" }).click();
   await page
     .getByRole("navigation", { name: "모바일 주요 메뉴" })

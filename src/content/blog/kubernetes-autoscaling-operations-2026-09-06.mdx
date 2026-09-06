@@ -1,0 +1,195 @@
+---
+title: "일요일 기술 심화: Kubernetes 1.37에서 autoscaling을 운영 경계로 읽기"
+description: "Kubernetes 1.37의 HPA scale-to-zero, metrics.k8s.io v1, watchcache 안정화, DRA 흐름을 Spring Boot 운영팀 관점에서 정리합니다."
+publishedAt: 2026-09-06T09:00:00+09:00
+draft: false
+category: "Infrastructure"
+tags: ["Kubernetes", "Autoscaling", "Spring Boot", "HPA", "Platform Engineering"]
+kind: "deep-dive"
+heroImage: "../../assets/blog/kubernetes-autoscaling-operations-2026-09-06/cover.webp"
+heroImageAlt: "Kubernetes 1.37 클러스터에서 Spring Boot 서비스의 metrics, HPA, API server, resource claim 경계가 연결된 운영 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "주간 기술 심화"
+lesson: 2
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 범위**
+>
+> 2026년 9월 6일 KST에 Kubernetes v1.37.0 release blog, Kubernetes v1.37 release information,
+> Kubernetes HPA 문서, Kubernetes metrics API 문서, Kubernetes API deprecation policy를 확인했습니다.
+> 기준 버전은 2026년 8월 26일 공개된 Kubernetes v1.37.0입니다. alpha, beta, feature gate, migration
+> 중인 API는 stable 기능처럼 설명하지 않았습니다.
+
+## 이번 주에 이 기술이 중요했던 이유
+
+지난 일요일에는 EOL과 런타임 업그레이드를 봤습니다. 이번 주에는 운영 질문을 한 단계 위로 올립니다.
+Kubernetes 1.37은 "새로운 배포 기능 하나"보다 **클러스터가 부하를 줄이고, 측정하고, 거절하고, 특수 자원을
+예약하는 방식**을 더 선명하게 보여 줍니다.
+
+Spring Boot 팀이 Kubernetes를 쓰면 보통 Deployment, Service, Ingress, HPA 정도를 먼저 만집니다. 그런데 운영
+장애는 애플리케이션 코드 바깥에서 자주 납니다.
+
+- CPU와 memory metric이 늦게 들어와 HPA가 엉뚱하게 움직입니다.
+- 컨트롤 플레인이 뜨는 동안 controller가 list/watch를 몰아 API server를 압박합니다.
+- batch, AI inference, media processing처럼 특수 자원이 필요한 workload가 일반 Pod처럼 스케줄됩니다.
+- 0개까지 줄이고 싶은 worker를 Deployment 복제 수와 HPA 규칙만으로 설명하려다 운영 기준이 흐려집니다.
+
+Kubernetes 1.37의 변화는 이 문제를 한 문장으로 정리하게 만듭니다.
+
+**autoscaling은 Pod 개수 조절 기능이 아니라 metric, API server, controller, scheduler가 함께 지키는 운영 경계입니다.**
+
+## 핵심 개념
+
+HPA는 애플리케이션의 "속도 조절 장치"가 아닙니다. HPA는 metrics API에서 값을 읽고, target과 비교하고,
+workload의 scale subresource를 수정합니다. Spring Boot 코드로 치면 controller가 직접 thread pool을 늘리는
+것이 아니라, 별도 운영 controller가 관측값을 보고 replica 수를 바꾸는 구조입니다.
+
+Kubernetes 1.37에서 눈에 띄는 지점은 네 가지입니다.
+
+| 변화 | 상태 | Spring Boot 팀이 읽을 포인트 |
+|---|---|---|
+| HPA scale-to-zero | beta로 다뤄야 하는 영역 | idle worker 비용을 줄일 수 있지만 cold start와 queue 지연을 설계해야 함 |
+| `metrics.k8s.io` API v1 | stable 승격 | `kubectl top`, HPA, metric 수집 계약을 beta API에만 기대지 않게 됨 |
+| watchcache 초기화 안정화 | stable로 고정 | API server 복구 시 list/watch 폭주와 HTTP 429 대응이 중요해짐 |
+| DRA ResourceClaim for workloads | beta | GPU, accelerator, 특수 장비를 Pod 단위가 아니라 workload 단위로 생각할 수 있음 |
+
+중요한 것은 상태를 섞지 않는 것입니다. stable API는 운영 계약에 넣을 수 있습니다. beta 기능은 실험과 제한된
+적용 범위를 먼저 정해야 합니다. alpha 기능은 기본 운영 문서가 아니라 연구 메모에 가깝습니다.
+
+## 내부 동작 원리
+
+Spring Boot 서비스가 HPA로 조정될 때 실제 흐름은 아래처럼 나뉩니다.
+
+<Mermaid title="Kubernetes autoscaling 운영 경계">
+{`flowchart LR
+  App["Spring Boot Pod"] --> Metrics["metrics.k8s.io v1"]
+  Metrics --> HPA["HPA controller"]
+  HPA --> Scale["scale subresource"]
+  Scale --> ReplicaSet["ReplicaSet, Pod 수 변경"]
+  ReplicaSet --> Scheduler["scheduler"]
+  Scheduler --> Node["node 배치"]
+  Api["kube-apiserver watchcache"] --> HPA
+  Api --> Scheduler
+`}
+</Mermaid>
+
+여기서 HPA가 보는 값은 애플리케이션 내부 metric과 다를 수 있습니다. 예를 들어 Spring Boot Actuator의
+request latency는 사용자가 체감하는 지연을 잘 보여 주지만, 기본 HPA는 CPU와 memory 같은 resource metric을
+먼저 봅니다. custom metric을 붙이면 더 정교해지지만, 그만큼 metric pipeline 장애가 곧 scaling 장애가 됩니다.
+
+Kubernetes 1.37에서 `metrics.k8s.io` API가 v1 stable로 올라간 것은 그래서 중요합니다. "CPU 사용률을 어디서
+읽는가"라는 계약이 장기간 beta에 머물지 않고 stable API로 정리됐다는 뜻입니다. 다만 stable API가 생겼다고
+기존 v1beta1 소비자가 즉시 끊긴다는 뜻은 아닙니다. Kubernetes API deprecation policy를 따라 전환 기간을 두고
+이동해야 합니다.
+
+watchcache 안정화는 다른 층의 문제입니다. 장애나 재시작 후 많은 controller가 동시에 list/watch를 요청하면
+etcd와 API server가 먼저 힘들어집니다. Kubernetes 1.37 release note는 bounded request 위임과 HTTP 429 응답을
+통해 control plane outage 위험을 줄이는 방향을 설명합니다. 여기서 애플리케이션 팀의 숙제는 간단합니다.
+
+**custom controller, operator, 배포 자동화가 429를 정상적인 backoff 신호로 다루는지 확인해야 합니다.**
+
+## 실무 설계 선택지
+
+Spring Boot 팀이 Kubernetes 1.37을 검토할 때 바로 version upgrade PR부터 만들 필요는 없습니다. 먼저 workload를
+세 묶음으로 나누는 편이 낫습니다.
+
+| workload 유형 | scaling 기준 | 운영 체크 |
+|---|---|---|
+| API server | latency, CPU, request rate | 최소 replica, readiness, graceful shutdown |
+| queue worker | queue depth, 처리 지연 | scale-to-zero 가능성, cold start, DLQ |
+| batch/AI job | 자원 예약, 실행 시간 | ResourceClaim, quota, retry, 비용 한도 |
+
+API server는 보통 0까지 줄이면 안 됩니다. 트래픽이 없어도 health check, warm cache, connection pool, 인증서와
+보안 필터 초기화 비용이 있기 때문입니다. 반대로 queue worker는 idle 비용을 줄이기 좋은 후보입니다. 다만
+메시지가 들어온 뒤 첫 Pod가 뜨고, JVM이 warm up되고, 외부 connection이 준비되는 시간까지 SLO에 넣어야 합니다.
+
+특수 자원이 필요한 workload는 HPA만으로 풀리지 않습니다. GPU나 accelerator, 특정 장비를 쓰는 작업은 "몇 개의
+Pod를 띄울까"보다 "어떤 자원을 누가 예약했는가"가 먼저입니다. Kubernetes 1.37의 DRA ResourceClaim 흐름은 이
+경계를 workload 단위로 생각하게 해 줍니다. beta이므로 바로 모든 production batch에 깔기보다, 비용과 자원
+경합이 큰 작업부터 별도 namespace와 quota로 실험하는 것이 현실적입니다.
+
+## Java/Spring 개발자가 자주 하는 오해
+
+첫 번째 오해는 "HPA를 켜면 성능 문제가 해결된다"입니다. HPA는 느린 쿼리, lock contention, connection pool
+고갈을 고치지 않습니다. CPU가 낮은데 latency가 높으면 replica를 늘려도 병목은 그대로일 수 있습니다.
+
+두 번째 오해는 "metrics API가 stable이면 모든 metric이 안전하다"입니다. stable은 API 계약의 상태입니다.
+수집 지연, metric adapter 장애, scrape 누락, Pod resource request 누락은 여전히 운영 이슈입니다.
+
+세 번째 오해는 "429는 실패다"입니다. control plane 관점에서 429는 무조건 나쁜 신호가 아니라 과부하를 더 키우지
+않기 위한 거절입니다. client가 즉시 재시도하면 보호 장치를 공격하는 셈이 됩니다. backoff와 jitter가 있어야 합니다.
+
+## 따라 해 볼 점검 절차
+
+운영 환경에 바로 적용하기 전에 staging cluster에서 아래 체크리스트를 돌립니다.
+
+```bash
+kubectl get --raw /apis/metrics.k8s.io/v1/nodes | jq '.items | length'
+kubectl get hpa -A
+kubectl describe hpa -n app checkout-api
+kubectl top pods -n app
+kubectl get events -n app --sort-by=.lastTimestamp | tail -30
+```
+
+그리고 각 서비스마다 아래 표를 채웁니다.
+
+```text
+service: checkout-api
+type: HTTP API
+minReplicas: 2
+scaleToZeroAllowed: no
+primaryMetric: CPU utilization
+secondaryMetric: p95 latency dashboard
+failureMode:
+  - metric missing -> keep current replicas
+  - API 429 -> controller backoff
+  - rollout -> PDB and readiness 확인
+```
+
+worker라면 질문이 달라집니다.
+
+```text
+service: invoice-worker
+type: queue worker
+minReplicas: 0 candidate
+coldStartBudget: 60s
+primaryMetric: queue depth
+guardrail:
+  - DLQ alarm
+  - maxReplicas cost limit
+  - first-message latency check
+```
+
+## 리스크와 적용 순서
+
+Kubernetes upgrade는 feature를 켜는 일과 API server를 올리는 일이 분리되어야 합니다.
+
+1. 현재 cluster에서 HPA, metrics-server, custom metric adapter 사용 현황을 inventory로 뽑습니다.
+2. API client와 controller가 HTTP 429를 backoff하는지 확인합니다.
+3. `metrics.k8s.io` v1 소비 가능 여부를 staging에서 확인합니다.
+4. API server workload는 최소 replica를 유지하고, worker만 scale-to-zero 후보로 분리합니다.
+5. DRA는 GPU나 accelerator처럼 비용이 큰 workload에서 별도 namespace로 실험합니다.
+
+이 순서를 지키면 Kubernetes 1.37을 "새 기능 목록"이 아니라 운영 경계 재정리 기회로 쓸 수 있습니다.
+
+## 다음에 확인할 지표
+
+- HPA event에 `FailedGetResourceMetric`이 반복되는지
+- 배포 직후 API server 429가 늘어나는지
+- worker cold start가 queue SLO를 넘는지
+- `kubectl top`과 애플리케이션 대시보드의 CPU/latency 방향이 맞는지
+- beta feature gate를 production 기본값처럼 문서화하고 있지 않은지
+
+이번 주의 결론은 단순합니다. autoscaling은 replica 수를 자동으로 늘리는 버튼이 아닙니다. metric 계약,
+control plane 보호, workload별 최소 replica, 자원 예약 기준을 함께 설계해야 비로소 운영 기능이 됩니다.
+
+## 참고자료
+
+- [Kubernetes v1.37: Garhwal](https://kubernetes.io/blog/2026/08/26/kubernetes-v1-37-release/)
+- [Kubernetes v1.37 Release Information](https://www.kubernetes.dev/resources/release/)
+- [Horizontal Pod Autoscaling](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/)
+- [Resource metrics pipeline](https://kubernetes.io/docs/tasks/debug/debug-cluster/resource-metrics-pipeline/)
+- [Kubernetes Deprecation Policy](https://kubernetes.io/docs/reference/using-api/deprecation-policy/)
