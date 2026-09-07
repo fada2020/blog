@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /일요일 주식 학습/ })
+    .getByRole("link", { name: /월요일 경제 기초/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/sunday-market-watchlist-risk-2026-09-06\/$/,
+    /\/blog\/posts\/monday-money-real-income-inflation-2026-09-07\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "일요일 주식 학습: 다음 주 관찰 목록은 매수 후보가 아니라 리스크 지도다",
+    "월요일 경제 기초: 월급 인상률보다 실질 구매력을 먼저 보기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "미국 고용, 국채금리, 유가, 달러 원 환율, 한국 수출주 노출을 다음 주 관찰 목록으로 정리한 시장 리스크 지도",
+    "월급 인상률, 소비자물가, 실질 구매력, 생활비 예산, 저축 여력이 하나의 개인 재무 대시보드로 연결된 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /일요일 주식 학습/,
+      name: /월요일 경제 기초/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Kubernetes 1.37/,
+      name: /Flutter 여덟째 걸음/,
     }),
   ).toBeVisible();
 });
@@ -157,7 +157,9 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await page.getByRole("link", { name: "다음" }).click();
   await expect(page).toHaveURL(/\/blog\/kinds\/learning\/page\/2\/$/);
   await expect(
-    page.getByRole("link", { name: "Spring Boot 개발자를 위한 Next.js 첫걸음" }),
+    page.getByRole("link", {
+      name: "Spring Boot 개발자를 위한 Flutter 넷째 걸음: Form validation과 입력 상태 다루기",
+    }),
   ).toBeVisible();
 });
 

@@ -1,0 +1,401 @@
+---
+title: "Spring Boot 개발자를 위한 Flutter 여덟째 걸음: 인증 상태와 라우팅 가드 연결하기"
+description: "Spring Security의 filter chain과 saved request에 익숙한 개발자 관점에서 Flutter 인증 상태, go_router redirect, 로그인 후 복귀 경로를 나눠 설계합니다."
+publishedAt: 2026-09-07T08:50:00+09:00
+draft: false
+category: "Frontend"
+tags: ["Flutter", "Dart", "Spring Boot", "Authentication", "go_router"]
+kind: "learning"
+heroImage: "../../assets/blog/flutter-auth-routing-guard-2026-09-07/cover.webp"
+heroImageAlt: "Flutter 앱의 인증 상태, go_router redirect, 로그인 화면, 보호된 대시보드가 Spring Security filter chain과 비교되어 연결된 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 모바일 앱 학습"
+lesson: 8
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 9월 7일에 Flutter SDK archive JSON, Flutter navigation 공식 문서, Flutter app architecture guide,
+> pub.dev `go_router` package page와 changelog를 확인했습니다. 기준 stable SDK는 Flutter 3.47.2이고
+> 포함된 Dart SDK는 3.13.2입니다. standalone Dart stable 최신은 3.13.3이지만, Flutter 앱 예제는
+> Flutter stable SDK에 포함된 Dart 3.13.2를 기준으로 설명합니다. `go_router` 최신 안정 버전은 18.0.1이며,
+> 18.0.0부터 최소 지원 SDK가 Flutter 3.44와 Dart 3.12로 올라갔습니다. beta, dev, main channel과
+> preview API는 안정판처럼 설명하지 않았습니다.
+
+## 결론부터 말하면
+
+Flutter에서 인증을 붙일 때 가장 흔한 실수는 로그인 여부를 화면마다 직접 검사하는 것입니다. 화면마다
+`if (!loggedIn)`을 넣으면 deep link, browser back, token 만료, 로그인 후 원래 화면 복귀가 서로 다른 방식으로
+흩어집니다.
+
+Spring Boot 개발자는 이 문제를 이미 알고 있습니다. Controller마다 로그인 여부를 검사하지 않고 Spring Security
+filter chain, security context, saved request가 먼저 요청을 가로챕니다. Flutter에서도 같은 감각이 필요합니다.
+다만 요청이 아니라 **route location과 app state가 만나는 경계**를 잡아야 합니다.
+
+## 이번 주 개념
+
+Flutter 공식 navigation 문서는 고급 navigation과 deep link가 필요한 앱에서 `go_router` 같은 routing package로
+route path를 파싱하고 `Navigator` 구성을 맞추는 방식을 설명합니다. `go_router` package는 application state에
+따라 사용자를 다른 URL로 보낼 수 있는 redirection 기능을 제공합니다.
+
+오늘은 세 값을 분리합니다.
+
+| 값 | 역할 | Spring Boot 비유 |
+|---|---|---|
+| 인증 상태 | 로그인됨, 로그아웃됨, 확인 중 | `SecurityContext` |
+| 라우팅 규칙 | 어떤 path가 보호되는지 결정 | `SecurityFilterChain` |
+| 복귀 경로 | 로그인 후 돌아갈 원래 location | saved request |
+
+이 셋을 섞으면 작은 앱에서는 빠르게 보이지만, 앱이 커질수록 상태 전이가 보이지 않습니다.
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Spring Security를 쓰는 서버에서는 요청이 Controller에 도달하기 전에 인증 필터가 먼저 동작합니다. 인증이 없으면
+로그인 화면으로 보내고, 인증이 끝나면 원래 요청으로 돌려보낼 수 있습니다.
+
+```java
+@Bean
+SecurityFilterChain security(HttpSecurity http) throws Exception {
+    return http
+        .authorizeHttpRequests(auth -> auth
+            .requestMatchers("/login", "/assets/**").permitAll()
+            .requestMatchers("/dashboard/**").authenticated()
+            .anyRequest().permitAll()
+        )
+        .formLogin(form -> form.loginPage("/login"))
+        .build();
+}
+```
+
+Controller는 "이 사용자가 로그인했는가"를 매번 직접 판단하지 않습니다. Controller는 이미 통과한 요청을 처리합니다.
+이 분리가 있어야 URL, 권한, 예외 응답을 한 곳에서 읽을 수 있습니다.
+
+## Flutter에서는 무엇이 다른가
+
+Flutter 앱은 서버 요청을 받지 않습니다. 사용자는 route를 바꾸고, deep link로 들어오고, 앱이 background에서
+돌아오고, token 저장소를 다시 읽습니다. 그래서 보호해야 할 것은 HTTP endpoint가 아니라 화면 location입니다.
+
+`go_router`를 쓰면 `MaterialApp.router`에 router configuration을 넘기고, route table과 redirect 규칙을 한
+곳에 둘 수 있습니다.
+
+```dart
+void main() {
+  runApp(const ShopApp());
+}
+
+class ShopApp extends StatelessWidget {
+  const ShopApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp.router(
+      routerConfig: appRouter,
+    );
+  }
+}
+```
+
+여기서 중요한 것은 `MaterialApp`의 화면 목록이 아니라 router가 현재 location을 보고 어떤 screen stack을 만들지
+결정한다는 점입니다. Flutter web에서는 browser history와도 연결됩니다.
+
+## 인증 상태를 먼저 모델링합니다
+
+처음부터 JWT 갱신, secure storage, refresh token까지 넣지 않습니다. 인증 글의 첫 단계에서는 상태를 세 가지로만
+봅니다.
+
+```dart
+enum AuthStatus {
+  checking,
+  signedOut,
+  signedIn,
+}
+
+class AuthState {
+  const AuthState({
+    required this.status,
+  });
+
+  final AuthStatus status;
+
+  bool get isChecking => status == AuthStatus.checking;
+  bool get isSignedIn => status == AuthStatus.signedIn;
+}
+```
+
+`checking`을 둔 이유는 앱 시작 직후 저장된 token을 읽는 시간이 있기 때문입니다. 이 상태를 생략하면 앱이 켜질 때
+잠깐 로그인 화면으로 튀었다가 다시 홈으로 이동하는 화면 흔들림이 생길 수 있습니다.
+
+## redirect는 화면이 아니라 경계에서 처리합니다
+
+아래 예제는 최소 구조만 보여 줍니다. `ValueNotifier`는 예제용이고, 실제 앱에서는 이전 글에서 다룬 Riverpod
+notifier나 view model로 바꿀 수 있습니다.
+
+```dart
+final authState = ValueNotifier<AuthState>(
+  const AuthState(status: AuthStatus.checking),
+);
+
+final appRouter = GoRouter(
+  initialLocation: "/",
+  refreshListenable: authState,
+  redirect: (context, state) {
+    final auth = authState.value;
+    final location = state.uri.toString();
+    final path = state.uri.path;
+
+    final isPublicPath = path == "/login" || path == "/checking";
+
+    if (auth.isChecking) {
+      return path == "/checking" ? null : "/checking";
+    }
+
+    if (!auth.isSignedIn && !isPublicPath) {
+      final from = Uri.encodeComponent(location);
+      return "/login?from=$from";
+    }
+
+    if (auth.isSignedIn && path == "/login") {
+      return state.uri.queryParameters["from"] ?? "/";
+    }
+
+    return null;
+  },
+  routes: [
+    GoRoute(
+      path: "/checking",
+      builder: (context, state) => const CheckingScreen(),
+    ),
+    GoRoute(
+      path: "/login",
+      builder: (context, state) => const LoginScreen(),
+    ),
+    GoRoute(
+      path: "/",
+      builder: (context, state) => const DashboardScreen(),
+    ),
+    GoRoute(
+      path: "/orders/:orderId",
+      builder: (context, state) {
+        final orderId = state.pathParameters["orderId"]!;
+        return OrderDetailScreen(orderId: orderId);
+      },
+    ),
+  ],
+);
+```
+
+redirect가 `null`을 반환하면 현재 navigation을 허용합니다. 문자열을 반환하면 그 location으로 다시 보냅니다.
+Spring Security filter가 Controller 진입 전에 요청을 판단하듯, 이 함수는 screen builder가 실행되기 전에
+location을 정리하는 경계입니다.
+
+## 로그인 후 원래 화면으로 돌아가기
+
+사용자가 `/orders/42` deep link로 들어왔는데 로그인하지 않았다면, 앱은 `/login?from=%2Forders%2F42`로 보냅니다.
+로그인이 끝난 뒤에는 `from` query를 읽어 원래 화면으로 돌아갈 수 있습니다.
+
+```dart
+class LoginScreen extends StatelessWidget {
+  const LoginScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: ElevatedButton(
+          onPressed: () {
+            authState.value = const AuthState(
+              status: AuthStatus.signedIn,
+            );
+          },
+          child: const Text("Sign in"),
+        ),
+      ),
+    );
+  }
+}
+```
+
+이 예제에서 버튼은 단순히 `authState`만 바꿉니다. `context.go("/")`를 직접 호출하지 않아도 router가 상태 변경을
+보고 redirect를 다시 평가합니다. 인증 화면은 "로그인 성공"이라는 사실만 알리고, 어디로 갈지는 routing 경계가
+정합니다.
+
+<Mermaid title="Flutter 인증 상태와 routing guard 흐름">
+{`flowchart TD
+  Link["/orders/42 deep link"] --> Router["go_router redirect"]
+  Router --> Auth{"인증 상태"}
+  Auth -->|checking| Checking["/checking"]
+  Auth -->|signedOut| Login["/login?from=/orders/42"]
+  Auth -->|signedIn| Order["/orders/42"]
+  Login --> SignIn["로그인 성공"]
+  SignIn --> AuthState["authState 변경"]
+  AuthState --> Router
+
+  Spring["Spring Security filter chain"] --> Saved["saved request"]
+  Saved --> Controller["Controller 진입"]
+`}
+</Mermaid>
+
+## 대응 개념 비교
+
+| Spring Boot 관점 | Flutter/go_router 관점 | 주의할 점 |
+|---|---|---|
+| `SecurityFilterChain` | `GoRouter.redirect` | 화면마다 인증 검사를 흩뿌리지 않습니다. |
+| `SecurityContext` | auth state provider 또는 view model | token 문자열과 UI 상태를 같은 값으로 보지 않습니다. |
+| saved request | `from` query 또는 별도 intent state | 외부 deep link와 내부 navigation을 모두 고려합니다. |
+| `permitAll()` | public route 목록 | 로그인, 약관, 점검 화면은 루프 예외가 필요합니다. |
+| Controller method | screen builder | builder 안에서 redirect를 대신하지 않습니다. |
+
+## 최소 실행 예제
+
+아래는 한 파일로 흐름을 확인할 수 있는 예제입니다. 실제 앱에서는 auth repository가 secure storage와 서버 검증을
+담당하고, 화면은 view model을 통해 sign-in action만 호출하게 나누는 편이 낫습니다.
+
+```dart
+import "package:flutter/material.dart";
+import "package:go_router/go_router.dart";
+
+enum AuthStatus { checking, signedOut, signedIn }
+
+class AuthState {
+  const AuthState(this.status);
+
+  final AuthStatus status;
+
+  bool get isChecking => status == AuthStatus.checking;
+  bool get isSignedIn => status == AuthStatus.signedIn;
+}
+
+final authState = ValueNotifier<AuthState>(
+  const AuthState(AuthStatus.signedOut),
+);
+
+final router = GoRouter(
+  initialLocation: "/orders/42",
+  refreshListenable: authState,
+  redirect: (context, state) {
+    final path = state.uri.path;
+    final isLogin = path == "/login";
+
+    if (!authState.value.isSignedIn && !isLogin) {
+      return "/login?from=${Uri.encodeComponent(state.uri.toString())}";
+    }
+
+    if (authState.value.isSignedIn && isLogin) {
+      return state.uri.queryParameters["from"] ?? "/";
+    }
+
+    return null;
+  },
+  routes: [
+    GoRoute(
+      path: "/login",
+      builder: (context, state) => const LoginScreen(),
+    ),
+    GoRoute(
+      path: "/",
+      builder: (context, state) => const DashboardScreen(),
+    ),
+    GoRoute(
+      path: "/orders/:orderId",
+      builder: (context, state) => OrderScreen(
+        orderId: state.pathParameters["orderId"]!,
+      ),
+    ),
+  ],
+);
+
+void main() {
+  runApp(const App());
+}
+
+class App extends StatelessWidget {
+  const App({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp.router(routerConfig: router);
+  }
+}
+
+class LoginScreen extends StatelessWidget {
+  const LoginScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: ElevatedButton(
+          onPressed: () {
+            authState.value = const AuthState(AuthStatus.signedIn);
+          },
+          child: const Text("Sign in"),
+        ),
+      ),
+    );
+  }
+}
+
+class DashboardScreen extends StatelessWidget {
+  const DashboardScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(child: Text("Dashboard")),
+    );
+  }
+}
+
+class OrderScreen extends StatelessWidget {
+  const OrderScreen({required this.orderId, super.key});
+
+  final String orderId;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(child: Text("Order $orderId")),
+    );
+  }
+}
+```
+
+실행하면 처음에는 `/orders/42`가 보호된 route이므로 로그인 화면으로 이동합니다. 버튼을 누르면 인증 상태가 바뀌고,
+router가 다시 평가되어 원래 주문 상세 화면으로 돌아갑니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫 번째 오해는 token이 있으면 곧바로 로그인 상태라고 보는 것입니다. 저장된 token은 문자열일 뿐입니다. 만료,
+폐기, 서버 clock 차이, refresh 실패가 모두 가능합니다. 앱 시작 시 `checking` 상태를 거쳐야 화면이 덜 흔들립니다.
+
+두 번째 오해는 redirect 안에서 네트워크 호출을 해결하려는 것입니다. redirect는 routing 판단 경계로 얇게 유지하는
+편이 좋습니다. token 검증과 refresh는 repository나 service가 맡고, redirect는 현재 auth state를 읽어 location만
+정하는 구조가 추적하기 쉽습니다.
+
+세 번째 오해는 로그인 화면에서 항상 홈으로 보내는 것입니다. 사용자가 알림이나 이메일 링크로 상세 화면에 들어왔다면
+로그인 후 그 화면으로 돌아가야 합니다. 이 동작은 모바일 앱에서도 웹의 saved request와 같은 사용자 경험입니다.
+
+## 연습 문제
+
+1. `/settings`는 로그인 사용자만 접근할 수 있고 `/help`는 공개 route인 예제를 만들어 보세요.
+2. `checking`, `signedOut`, `signedIn` 세 상태에서 `/orders/42`가 어느 화면으로 가는지 표로 정리해 보세요.
+3. 로그인 성공 후 항상 `/`로 보내는 방식과 `from`으로 원래 location에 복귀하는 방식의 장단점을 비교해 보세요.
+4. token refresh 실패 시 auth state와 router location을 어떤 순서로 바꿀지 적어 보세요.
+5. Spring Security의 saved request와 Flutter의 deep link 복귀 경로가 같은 점과 다른 점을 한 문장씩 써 보세요.
+
+## 다음에 확인할 것
+
+인증 routing guard까지 붙이면 앱의 큰 흐름은 보이기 시작합니다. 다음 Flutter 글에서는 이 흐름에 error handling을
+연결합니다. 서버 validation 실패, 인증 만료, 네트워크 실패, 빈 데이터는 모두 "에러"로 보이지만 화면과 재시도
+방식은 서로 달라야 합니다.
+
+## 참고자료
+
+- [Flutter SDK archive](https://docs.flutter.dev/install/archive)
+- [Flutter navigation and routing](https://docs.flutter.dev/ui/navigation)
+- [Flutter app architecture guide](https://docs.flutter.dev/app-architecture/guide)
+- [go_router package](https://pub.dev/packages/go_router)
+- [go_router changelog](https://pub.dev/packages/go_router/changelog)

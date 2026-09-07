@@ -9,15 +9,15 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(51);
+  expect(entries).toHaveLength(53);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "일요일 주식 학습: 다음 주 관찰 목록은 매수 후보가 아니라 리스크 지도다",
+    "월요일 경제 기초: 월급 인상률보다 실질 구매력을 먼저 보기",
   );
   expect(entries[0].href).toBe(
-    "/blog/posts/sunday-market-watchlist-risk-2026-09-06/",
+    "/blog/posts/monday-money-real-income-inflation-2026-09-07/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });
