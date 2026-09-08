@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /월요일 경제 기초/ })
+    .getByRole("link", { name: /2026년 9월 둘째 주 IT 기술동향/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/monday-money-real-income-inflation-2026-09-07\/$/,
+    /\/blog\/posts\/weekly-it-trends-2026-09-08\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "월요일 경제 기초: 월급 인상률보다 실질 구매력을 먼저 보기",
+    "2026년 9월 둘째 주 IT 기술동향: CI 가시성, 패키지 신뢰, 서버리스 런타임",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "월급 인상률, 소비자물가, 실질 구매력, 생활비 예산, 저축 여력이 하나의 개인 재무 대시보드로 연결된 다이어그램",
+    "CI runner 수명, npm trusted publishing, Python Workers, Cloud Run, Cloud SQL 인증, Docker Engine 보안 항목이 운영 점검판에 놓인 이미지",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /월요일 경제 기초/,
+      name: /2026년 9월 둘째 주 IT 기술동향/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Flutter 여덟째 걸음/,
+      name: /Flutter 아홉째 걸음/,
     }),
   ).toBeVisible();
 });

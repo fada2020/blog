@@ -1,0 +1,355 @@
+---
+title: "Spring Boot 개발자를 위한 Flutter 아홉째 걸음: 로컬 저장소와 토큰 보관 경계 나누기"
+description: "Spring Security의 세션, remember-me, 토큰 저장 경계와 비교하며 Flutter에서 shared_preferences, secure storage, repository를 나누는 기준을 정리합니다."
+publishedAt: 2026-09-08T08:50:00+09:00
+draft: false
+category: "Frontend"
+tags: ["Flutter", "Dart", "Spring Boot", "Storage", "Security"]
+kind: "learning"
+heroImage: "../../assets/blog/flutter-secure-local-storage-2026-09-08/cover.webp"
+heroImageAlt: "Flutter 앱의 설정 저장소, secure storage, auth repository, Spring Security 세션 경계가 분리된 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 모바일 앱 학습"
+lesson: 9
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 9월 8일에 Flutter SDK archive JSON, Flutter key-value persistence cookbook,
+> Flutter offline-first architecture guide, pub.dev `shared_preferences`, `flutter_secure_storage`,
+> `go_router`, `flutter_riverpod` 패키지 정보를 확인했습니다. 기준 stable SDK는 Flutter 3.47.2이고
+> 포함된 Dart SDK는 3.13.2입니다. 예제 기준 패키지는 `shared_preferences` 2.5.5,
+> `flutter_secure_storage` 11.0.0, `go_router` 18.0.1, `flutter_riverpod` 3.4.3입니다.
+> beta, dev, main channel은 안정판처럼 다루지 않았습니다.
+
+## 결론부터 말하면
+
+Flutter 앱에서 "앱을 다시 켜도 로그인되어 있게 만들기"를 가장 빠르게 구현하는 방법은 token 문자열을
+어딘가에 저장하고 시작할 때 읽는 것입니다. 하지만 저장소를 한 가지로만 보면 곧 문제가 생깁니다.
+테마, 온보딩 완료 여부, 마지막으로 본 탭, access token, refresh token, 사용자 프로필 cache는 위험도와
+수명이 다릅니다.
+
+Spring Boot 개발자에게 익숙한 기준으로 보면, 이것은 세션, remember-me cookie, database row, cache를
+구분하는 일과 같습니다. 서버에서 `HttpSession`과 영구 refresh token table을 같은 것으로 보지 않는 것처럼,
+Flutter에서도 **설정값 저장소와 민감한 인증 저장소, 화면 cache를 분리**해야 합니다.
+
+이번 글은 여덟째 글의 인증 라우팅 가드 다음 단계입니다. 라우터가 인증 상태를 읽으려면 앱 시작 시 저장된
+credential을 복원해야 합니다. 그 복원 경계를 widget 안에 넣지 않고 repository와 storage adapter로 나누는
+방법을 다룹니다.
+
+## 이번 주 개념
+
+Flutter 공식 key-value persistence 문서는 작은 key-value 묶음에는 `shared_preferences`를 쓸 수 있다고 설명합니다.
+다만 공식 패키지 문서는 값이 비동기로 disk에 반영될 수 있고, 쓰기 반환 이후에도 영속성이 보장되지 않으므로
+중요 데이터 저장에 쓰지 말라고 명확히 경고합니다. 지원 타입도 primitive 중심입니다.
+
+반대로 token, session id, 개인 식별 credential은 더 좁은 저장소가 필요합니다. `flutter_secure_storage`는
+pub.dev 기준 Android, iOS, macOS, Windows, Linux, Web을 지원하고 platform-specific secure storage를 사용합니다.
+웹에서는 HTTPS 또는 localhost 환경이 필요하다는 제약도 있습니다.
+
+오늘의 최소 경계는 세 가지입니다.
+
+| 저장 대상 | Flutter 저장소 | Spring Boot 비유 |
+|---|---|---|
+| theme, locale, onboarding flag | `SharedPreferencesAsync` 또는 `SharedPreferencesWithCache` | 사용자 설정 table 또는 browser preference |
+| access/refresh token | secure storage adapter | remember-me token repository 또는 session credential 저장소 |
+| 프로필, 목록, 임시 화면 data | repository 내부 cache 또는 local database | service cache, read model, query cache |
+
+하나의 "storage service"로 모든 것을 감싸면 처음에는 편하지만, 보안 요구와 테스트 경계가 흐려집니다.
+민감도와 수명을 기준으로 작게 나누는 편이 유지보수에 유리합니다.
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Spring Security 서버에서는 인증 상태와 영구 credential을 분리합니다. 세션은 짧게 살고, remember-me나 refresh
+token은 별도 저장소에서 관리하며, 로그아웃이나 token rotation이 일어나면 저장소를 명시적으로 지웁니다.
+
+```java
+@Service
+class AuthSessionService {
+
+    private final RefreshTokenRepository refreshTokens;
+
+    void signOut(Long userId, String refreshToken) {
+        refreshTokens.revoke(userId, refreshToken);
+        SecurityContextHolder.clearContext();
+    }
+}
+```
+
+Controller가 cookie 파일을 직접 읽지 않습니다. Service와 repository가 "이 token이 아직 유효한가"를 판단하고,
+filter chain은 그 결과를 security context로 올립니다.
+
+Flutter도 같은 원칙을 가져가면 됩니다. 화면은 secure storage를 직접 읽지 않습니다. 화면은 auth repository의
+상태만 보고, repository가 secure storage와 API client를 조합합니다.
+
+## Flutter에서는 무엇이 다른가
+
+Flutter 앱은 process가 죽었다가 다시 살아날 수 있고, background push나 deep link로 예상하지 못한 시점에
+초기화될 수 있습니다. 따라서 저장소 복원은 화면 build보다 먼저, 또는 라우터 redirect가 안정적으로 기다릴 수
+있는 provider 경계에서 끝나야 합니다.
+
+<Mermaid title="Flutter 로컬 저장소와 인증 복원 경계">
+{`flowchart TD
+  AppStart["앱 시작"] --> Bootstrap["AuthRepository.bootstrap()"]
+  Bootstrap --> Secure["SecureTokenStore<br/>access/refresh token"]
+  Bootstrap --> Prefs["PreferencesStore<br/>theme, onboarding"]
+  Secure --> Api["AuthApiClient<br/>token 검증/갱신"]
+  Api --> State["AuthState<br/>checking/signedOut/signedIn"]
+  State --> Router["go_router redirect"]
+  State --> Screen["화면은 상태만 구독"]
+  Screen --> Action["signOut/signIn"]
+  Action --> Bootstrap
+`}
+</Mermaid>
+
+이 구조에서 중요한 점은 "저장소를 읽는 시점"입니다. `build()` 안에서 `await storage.read()`를 직접 부르면
+화면 lifecycle과 credential lifecycle이 섞입니다. 대신 앱 시작 시 bootstrap을 실행하고, 그 결과를
+`AuthStatus.checking`, `signedOut`, `signedIn` 같은 작은 상태로 드러내면 라우팅 가드와 화면이 같은 기준을
+공유할 수 있습니다.
+
+## 대응 개념 비교
+
+| Spring Boot 관점 | Flutter 관점 | 주의할 점 |
+|---|---|---|
+| `HttpSession` | memory auth state | process 종료 후 사라질 수 있습니다. |
+| remember-me token table | secure storage + refresh API | 로그아웃과 rotation 때 반드시 삭제합니다. |
+| `application.yml` 사용자 설정 | `shared_preferences` | 중요한 데이터와 섞지 않습니다. |
+| `@Transactional` token revoke | `Future<void> signOut()` | API revoke, local delete, UI state 전이를 한 순서로 봅니다. |
+| integration test | fake storage + fake API client | 실제 platform storage 없이 상태 전이를 검증합니다. |
+
+`shared_preferences`는 편리하지만 인증 token의 기본 선택지가 아닙니다. 공식 패키지가 중요 데이터 저장을
+피하라고 설명하기 때문입니다. 앱 설정처럼 없어져도 다시 만들 수 있는 값, 또는 서버에서 다시 받을 수 있는 낮은
+위험 값에 쓰는 편이 맞습니다.
+
+## 최소 실행 예제
+
+먼저 저장소 인터페이스를 작게 나눕니다. 예제에서는 실제 plugin import 대신 앱 코드가 의존할 인터페이스부터
+보여 줍니다.
+
+```dart
+abstract interface class TokenStore {
+  Future<String?> readRefreshToken();
+  Future<void> writeRefreshToken(String token);
+  Future<void> clear();
+}
+
+abstract interface class PreferenceStore {
+  Future<bool> hasSeenOnboarding();
+  Future<void> markOnboardingSeen();
+}
+```
+
+실제 구현은 plugin에 붙입니다. token은 secure storage로, 단순 설정은 preferences로 보냅니다.
+
+```dart
+import "package:flutter_secure_storage/flutter_secure_storage.dart";
+import "package:shared_preferences/shared_preferences.dart";
+
+class SecureTokenStore implements TokenStore {
+  SecureTokenStore(this._storage);
+
+  static const _refreshTokenKey = "auth.refreshToken";
+
+  final FlutterSecureStorage _storage;
+
+  @override
+  Future<String?> readRefreshToken() {
+    return _storage.read(key: _refreshTokenKey);
+  }
+
+  @override
+  Future<void> writeRefreshToken(String token) {
+    return _storage.write(key: _refreshTokenKey, value: token);
+  }
+
+  @override
+  Future<void> clear() {
+    return _storage.delete(key: _refreshTokenKey);
+  }
+}
+
+class SharedPreferenceStore implements PreferenceStore {
+  SharedPreferenceStore(this._preferences);
+
+  static const _onboardingKey = "onboarding.seen";
+
+  final SharedPreferencesAsync _preferences;
+
+  @override
+  Future<bool> hasSeenOnboarding() async {
+    return await _preferences.getBool(_onboardingKey) ?? false;
+  }
+
+  @override
+  Future<void> markOnboardingSeen() {
+    return _preferences.setBool(_onboardingKey, true);
+  }
+}
+```
+
+그 다음 auth repository가 API client와 token store를 조합합니다.
+
+```dart
+enum AuthStatus { checking, signedOut, signedIn }
+
+class AuthState {
+  const AuthState({
+    required this.status,
+    this.user,
+  });
+
+  final AuthStatus status;
+  final UserProfile? user;
+
+  bool get isSignedIn => status == AuthStatus.signedIn;
+}
+
+class AuthRepository {
+  AuthRepository({
+    required TokenStore tokenStore,
+    required AuthApiClient apiClient,
+  })  : _tokenStore = tokenStore,
+        _apiClient = apiClient;
+
+  final TokenStore _tokenStore;
+  final AuthApiClient _apiClient;
+
+  Future<AuthState> bootstrap() async {
+    final refreshToken = await _tokenStore.readRefreshToken();
+
+    if (refreshToken == null) {
+      return const AuthState(status: AuthStatus.signedOut);
+    }
+
+    try {
+      final session = await _apiClient.refresh(refreshToken);
+      await _tokenStore.writeRefreshToken(session.refreshToken);
+
+      return AuthState(
+        status: AuthStatus.signedIn,
+        user: session.user,
+      );
+    } on UnauthorizedException {
+      await _tokenStore.clear();
+      return const AuthState(status: AuthStatus.signedOut);
+    }
+  }
+
+  Future<void> signOut() async {
+    final refreshToken = await _tokenStore.readRefreshToken();
+    if (refreshToken != null) {
+      await _apiClient.revoke(refreshToken);
+    }
+    await _tokenStore.clear();
+  }
+}
+```
+
+여기서 `bootstrap()`은 "저장된 token이 있다"를 곧바로 로그인으로 보지 않습니다. 서버에 refresh를 요청해
+아직 유효한지 확인하고, 실패하면 local token을 지웁니다. Spring Security에서 remember-me cookie만 보고
+무조건 인증된 사용자로 처리하지 않는 것과 같은 감각입니다.
+
+## Riverpod과 라우터에 연결하기
+
+Riverpod을 쓴다면 provider는 plugin 객체보다 앱이 이해하는 repository를 노출하는 편이 낫습니다.
+
+```dart
+final tokenStoreProvider = Provider<TokenStore>((ref) {
+  return SecureTokenStore(const FlutterSecureStorage());
+});
+
+final authRepositoryProvider = Provider<AuthRepository>((ref) {
+  return AuthRepository(
+    tokenStore: ref.watch(tokenStoreProvider),
+    apiClient: ref.watch(authApiClientProvider),
+  );
+});
+
+final authStateProvider = FutureProvider<AuthState>((ref) async {
+  return ref.watch(authRepositoryProvider).bootstrap();
+});
+```
+
+라우터는 `AsyncValue`를 그대로 많이 알 필요가 없습니다. 앱이 아직 credential을 복원 중이면 splash나 checking
+route에 머물고, 복원이 끝난 뒤 보호된 route를 판단하면 됩니다.
+
+```dart
+String? redirectFor({
+  required AuthState auth,
+  required Uri location,
+}) {
+  final isLogin = location.path == "/login";
+
+  if (!auth.isSignedIn && !isLogin) {
+    return "/login?from=${Uri.encodeComponent(location.toString())}";
+  }
+
+  if (auth.isSignedIn && isLogin) {
+    return location.queryParameters["from"] ?? "/";
+  }
+
+  return null;
+}
+```
+
+테스트는 실제 secure storage 없이 fake로 충분합니다.
+
+```dart
+class InMemoryTokenStore implements TokenStore {
+  String? _refreshToken;
+
+  @override
+  Future<String?> readRefreshToken() async => _refreshToken;
+
+  @override
+  Future<void> writeRefreshToken(String token) async {
+    _refreshToken = token;
+  }
+
+  @override
+  Future<void> clear() async {
+    _refreshToken = null;
+  }
+}
+```
+
+## Java 개발자가 자주 하는 오해
+
+- `shared_preferences`를 "작은 DB"처럼 보면 안 됩니다. primitive 설정 저장소에 가깝습니다.
+- token 문자열이 있으면 로그인 상태라고 단정하면 안 됩니다. 서버 검증이나 refresh 실패 경로가 필요합니다.
+- secure storage가 모든 보안 문제를 해결하지 않습니다. 탈옥, 루팅, 화면 캡처, 로그 출력, 백업 정책은 별도입니다.
+- 로그아웃은 화면 이동이 아닙니다. 서버 revoke, local delete, auth state 전이를 순서대로 끝내야 합니다.
+- 앱 시작 bootstrap을 widget `build()`에 넣으면 재빌드와 I/O가 섞입니다.
+
+## 연습 문제
+
+1. 위 예제의 `AuthRepository.bootstrap()`에 네트워크 실패 상태를 추가해 보세요. token을 바로 지울지,
+   오프라인 상태로 유지할지 정책을 정해야 합니다.
+2. `PreferenceStore`에 theme mode를 저장하는 메서드를 추가해 보세요. token store와 같은 class에 넣지 않는
+   이유를 설명해 보세요.
+3. `signOut()`에서 서버 revoke는 실패했지만 local token 삭제는 성공한 경우, 화면에는 어떤 상태를 보여줄지
+   정리해 보세요.
+
+## 실무 체크리스트
+
+- [ ] 저장 값 목록을 설정, credential, cache, 파일로 분류한다.
+- [ ] `shared_preferences`에는 없어져도 복구 가능한 primitive 설정만 둔다.
+- [ ] refresh token은 secure storage adapter 뒤에 숨긴다.
+- [ ] 앱 시작 시 저장된 token을 서버에서 검증하거나 refresh한다.
+- [ ] 로그아웃은 서버 revoke와 local delete를 모두 포함한다.
+- [ ] provider override나 fake storage로 bootstrap, sign-in, sign-out 테스트를 작성한다.
+- [ ] web target에서는 secure storage가 HTTPS 또는 localhost에서만 동작한다는 제약을 확인한다.
+
+## 참고자료
+
+- [Flutter SDK archive](https://docs.flutter.dev/install/archive)
+- [Flutter release notes](https://docs.flutter.dev/release/release-notes)
+- [Flutter key-value persistence cookbook](https://docs.flutter.dev/cookbook/persistence/key-value)
+- [Flutter offline-first architecture guide](https://docs.flutter.dev/app-architecture/design-patterns/offline-first)
+- [shared_preferences package](https://pub.dev/packages/shared_preferences)
+- [flutter_secure_storage package](https://pub.dev/packages/flutter_secure_storage)
+- [go_router package](https://pub.dev/packages/go_router)
+- [flutter_riverpod package](https://pub.dev/packages/flutter_riverpod)

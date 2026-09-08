@@ -1,0 +1,194 @@
+---
+title: "2026년 9월 둘째 주 IT 기술동향: CI 가시성, 패키지 신뢰, 서버리스 런타임"
+description: "2026년 9월 1일부터 9월 8일까지 공식 발표된 GitHub Actions, npm trusted publishing, Cloudflare Python Workers, Cloud Run, Cloud SQL, Docker Engine 변화를 정리합니다."
+publishedAt: 2026-09-08T09:05:00+09:00
+draft: false
+category: "DevOps"
+tags: ["Tech Trends", "CI CD", "Supply Chain", "Serverless", "Database"]
+kind: "trend"
+heroImage: "../../assets/blog/weekly-it-trends-2026-09-08/cover.webp"
+heroImageAlt: "CI runner 수명, npm trusted publishing, Python Workers, Cloud Run, Cloud SQL 인증, Docker Engine 보안 항목이 운영 점검판에 놓인 이미지"
+imageCredit:
+  label: "직접 생성 이미지"
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 범위**
+>
+> 2026년 9월 8일에 공식 changelog, 공식 릴리스 노트와 공식 문서를 확인했습니다.
+> 범위는 2026년 9월 1일부터 2026년 9월 8일까지 공개된 공식 발표입니다. 기준 상태는
+> GitHub Actions early September updates, npm multiple trusted publishing configurations GA,
+> Cloudflare Python Workers WSGI/ASGI support, Cloud Run Go 1.27 runtime GA와 Agent Platform features
+> preview, Cloud SQL for PostgreSQL Workforce Identity Federation authentication, Docker Engine 29.8.0입니다.
+> preview 기능은 운영 안정 기능처럼 설명하지 않았습니다.
+
+## 결론부터 말하면
+
+이번 주 동향은 **개발 파이프라인과 서버리스 실행 환경의 경계가 더 세밀해지고, 인증과 공급망 증적을 자동화하는
+흐름**으로 볼 수 있습니다.
+
+GitHub Actions는 self-hosted runner deprecation을 API로 조회하고, workflow token의 Dependabot alert 접근을
+더 좁은 permission으로 나누기 시작했습니다. npm은 trusted publishing 구성을 여러 개 둘 수 있게 하면서 staging과
+malware scanning 승인 흐름을 강화했습니다. Cloudflare는 Python Workers에서 Django, Flask, FastAPI 같은 WSGI/ASGI
+framework를 받을 수 있게 했고, Google Cloud Run은 Go 1.27 runtime을 GA로 전환했습니다. Cloud SQL은 Workforce
+Identity Federation 인증을 PostgreSQL에 추가했고, Docker Engine 29.8.0은 container umask와 AppArmor/SELinux
+보안 항목을 보강했습니다.
+
+Spring Boot 팀이 볼 지점은 "새 런타임이 생겼다"보다 "CI, 패키지 배포, 서버리스, DB 접속, container runtime을
+어떤 증적으로 관리할 것인가"입니다. Java 서비스 하나만 봐서는 운영 위험을 다 볼 수 없습니다.
+
+## 이번 주에 확인한 큰 흐름
+
+| 영역 | 공식 발표 | Spring Boot 팀이 볼 지점 |
+|---|---|---|
+| CI/CD 운영 | GitHub Actions runner deprecation API, `vulnerability-alerts` permission | runner upgrade와 Dependabot alert 조회를 최소 권한으로 관리합니다. |
+| 공급망 보안 | npm multiple trusted publishing configurations GA | stable, prerelease, staging publish를 OIDC 기준으로 분리합니다. |
+| 서버리스 런타임 | Cloudflare Python Workers WSGI/ASGI, Cloud Run Go 1.27 GA | 작은 framework service와 agent-adjacent workload 배치 선택지가 늘어납니다. |
+| 데이터 인증 | Cloud SQL for PostgreSQL Workforce Identity Federation | 외부 IdP 기반 DB 접속을 계정 lifecycle과 감사 기준으로 봅니다. |
+| 컨테이너 보안 | Docker Engine 29.8.0 | container default permission, log attribution, host socket 방어를 점검합니다. |
+
+직전 기술동향 글은 Claude in Chrome, Copilot global model policy, Cloudflare Access token format, Apigee hybrid,
+Node.js patch를 다뤘습니다. 이번 글에서는 같은 Copilot 모델 정책과 Node/Apigee patch 축을 반복하지 않고,
+CI/CD, 패키지 배포, 서버리스 런타임, DB 인증, Docker Engine으로 범위를 옮겼습니다.
+
+<Mermaid title="2026년 9월 둘째 주 기술 동향 흐름">
+{`flowchart LR
+  Official["공식 발표<br/>2026-09-01 ~ 2026-09-08"] --> CI["CI/CD 가시성"]
+  Official --> Supply["패키지 배포 신뢰"]
+  Official --> Runtime["서버리스 런타임"]
+  Official --> Identity["DB 인증"]
+  Official --> Container["컨테이너 보안"]
+
+  CI --> Review["운영 검토"]
+  Supply --> Review
+  Runtime --> Review
+  Identity --> Review
+  Container --> Review
+
+  Review --> Evidence["증적"]
+  Review --> LeastPrivilege["최소 권한"]
+  Review --> Upgrade["업그레이드 일정"]
+`}
+</Mermaid>
+
+## 1. GitHub Actions는 runner 수명과 보안 알림 접근을 더 명시적으로 나눕니다
+
+GitHub는 2026년 9월 3일 GitHub Actions early September updates를 발표했습니다. 핵심은 세 가지입니다.
+첫째, runner version deprecation을 조회하는 REST API가 생겼습니다. repository, organization, enterprise level에서
+`GET /actions/runners/deprecations/{version}`로 특정 runner version의 runtime support 종료일과 registration
+종료일을 확인할 수 있습니다. 둘째, `GITHUB_TOKEN`에 `vulnerability-alerts` read permission을 줄 수 있습니다.
+셋째, reusable workflow가 자기 workflow file의 repository, path, ref, sha를 `job` context에서 확인할 수 있습니다.
+
+Spring Boot 팀에서 self-hosted runner를 쓰면 runner version은 사실상 운영 agent입니다. 오래된 runner가 갑자기
+등록되지 않거나 runtime 지원이 끝나면 배포 pipeline이 멈춥니다. 이제 runner image inventory를 만들 때 "현재
+version"만 저장하지 말고 deprecation API 결과도 함께 저장할 수 있습니다.
+
+`vulnerability-alerts` permission도 작지만 중요합니다. 예전에는 Dependabot alert를 workflow에서 읽기 위해 더 넓은
+권한을 주기 쉬웠습니다. 이제는 alert 조회 job을 read-only로 좁히고, issue 생성이나 PR 수정 job과 permission을
+분리할 수 있습니다.
+
+## 2. npm trusted publishing은 여러 OIDC 구성을 가질 수 있습니다
+
+GitHub는 같은 날 npm의 multiple trusted publishing configurations가 generally available이라고 공지했습니다.
+하나의 npm package에 stable, prerelease, staging workflow를 위한 OIDC trusted publishing 구성을 여러 개 둘 수
+있고, 각 구성은 repository, workflow, environment criteria를 독립적으로 갖습니다. publish나 stage 요청은 어느
+하나의 구성이 OIDC token과 맞으면 승인됩니다.
+
+중요한 정책도 함께 나왔습니다. 각 trusted publishing configuration은 기본적으로 stage만 할 수 있고, direct
+publishing은 opt-in입니다. staged package는 malware scanning이 끝난 뒤에만 승인할 수 있으며, package versions
+tab에서 staged history를 볼 수 있습니다.
+
+Java/Spring Boot 팀도 npm을 남의 일로 보기 어렵습니다. frontend build, shared TypeScript SDK, design system,
+Playwright helper, internal CLI가 npm package로 배포될 수 있기 때문입니다. long-lived npm token을 CI secret에
+넣는 대신, workflow별 OIDC 구성과 staging approval을 기본값으로 두는 편이 공급망 사고를 줄입니다.
+
+## 3. Cloudflare와 Cloud Run은 서버리스 런타임 선택지를 넓혔습니다
+
+Cloudflare Docs changelog는 2026년 9월 2일 Python Workers에서 WSGI와 ASGI web framework를 지원한다고 공지했습니다.
+Django와 Flask는 `workers.wsgi`, FastAPI와 Starlette는 `workers.asgi`로 Worker entrypoint에 연결할 수 있습니다.
+이는 Python service를 edge/serverless 환경으로 옮길 때 framework를 완전히 다시 쓰지 않아도 되는 선택지를 줍니다.
+
+Google Cloud Run release notes는 2026년 9월 1일 Go 1.27 runtime support가 GA라고 안내했습니다. 같은 항목에는
+Cloud Run services와 jobs에서 AI agent와 MCP server를 system-managed Agent Identities로 인증하고 Agent Registry에
+자동 등록하는 Agent Platform features가 preview로 추가됐습니다.
+
+운영 판단은 구분해서 해야 합니다.
+
+| 항목 | 상태 | 운영 판단 |
+|---|---|---|
+| Python Workers WSGI/ASGI | 공식 changelog 발표 | 작은 Django/Flask/FastAPI endpoint를 edge 근처로 옮길 후보입니다. |
+| Cloud Run Go 1.27 runtime | GA | Go 기반 sidecar, worker, internal API의 표준 runtime 후보입니다. |
+| Cloud Run Agent Platform features | Preview | agent identity 설계와 MCP 인증 PoC에 두고 운영 표준으로 단정하지 않습니다. |
+
+Spring Boot 서비스를 중심에 둔 팀이라도 Python worker, Go batch, agent integration은 주변 도구로 들어옵니다.
+중요한 것은 "서버리스라서 운영이 없다"가 아니라, runtime support date, IAM, logging, cold start, egress, rollback
+기준을 service마다 적는 것입니다.
+
+## 4. Cloud SQL for PostgreSQL은 외부 IdP 기반 인증을 지원합니다
+
+Google Cloud SQL for PostgreSQL release notes는 2026년 9월 2일 Workforce Identity Federation authentication을
+지원한다고 밝혔습니다. Microsoft Active Directory나 Okta 같은 외부 identity provider의 identity로 Cloud SQL
+instance에 인증할 수 있는 기능입니다.
+
+이 발표는 DB password를 없애는 한 방의 해결책이 아닙니다. 대신 DB 접속 권한을 사람과 workload identity lifecycle에
+더 가깝게 붙일 수 있게 하는 변화입니다. 운영팀은 다음 질문을 먼저 봐야 합니다.
+
+- 외부 IdP group과 PostgreSQL role mapping을 어떻게 관리할 것인가
+- 퇴사, 조직 이동, 임시 권한이 DB 접속에서 언제 반영되는가
+- break-glass 계정은 password와 IdP 중 어디에 둘 것인가
+- migration tool, BI tool, batch job은 사람 identity와 service identity 중 무엇을 쓸 것인가
+
+Spring Boot 애플리케이션의 runtime DB credential은 여전히 Secret Manager, IAM database authentication, service
+account 경계와 함께 봐야 합니다. Workforce Identity Federation은 특히 운영자, analyst, migration 담당자의 직접
+접속을 줄이거나 감사 가능하게 만들 때 효과가 큽니다.
+
+## 5. Docker Engine 29.8.0은 권한 기본값과 host 경계를 다시 보게 합니다
+
+Docker Docs는 2026년 9월 3일 Docker Engine 29.8.0 release notes를 공개했습니다. 새 항목에는 container main
+process, exec, healthcheck의 umask를 지정하는 `HostConfig.Umask`와 `docker create`/`docker run --umask <octal>`
+flag가 포함됐습니다. `awslogs` logging driver에는 service name, environment, custom CloudWatch entity attributes를
+붙이는 기능이 추가됐습니다.
+
+보안 항목도 눈에 띕니다. daemon의 default AppArmor profile template을 설정할 수 있고, container가 32-bit
+`socketcall(2)` path로 `AF_VSOCK` socket을 만들어 host virtual machine과 통신하는 경로를 AppArmor와 SELinux rule로
+막는 변경이 들어갔습니다.
+
+Spring Boot 팀이 Docker Engine version을 직접 고정하지 않더라도 CI runner, developer workstation, build agent,
+self-hosted deployment node에는 Docker가 깔려 있습니다. `--umask`는 container가 만든 file permission을 더 예측
+가능하게 만들고, logging driver attribution은 CloudWatch에서 어떤 service/environment가 log를 냈는지 추적하는 데
+도움이 됩니다. 보안 profile 변화는 sandbox와 CI 격리 기준에도 영향을 줍니다.
+
+## 본문에 넣지 않은 후보와 제외 이유
+
+- GPT-6 Astra와 Gemini 3.8 Flash의 GitHub Copilot 제공은 공식 발표였지만, 직전 기술동향이 Copilot model policy를
+  이미 다뤘고 수요일 AI agent 편성에서 더 깊게 비교하는 편이 적절해 제외했습니다.
+- GitHub Copilot model deprecation 공지도 중요하지만, 같은 Copilot 모델 운영 축이라 이번 글에서는 CI/CD와 supply
+  chain으로 초점을 옮겼습니다.
+- GKE 2026-R37 version updates는 공식 release notes에 있었지만, 2026년 9월 6일 Kubernetes autoscaling 심화 글과
+  주제가 가까워 반복을 피했습니다.
+- Cloudflare D1 free tier query limit enforcement는 운영 영향이 있지만, 이번 글에서는 framework runtime 변화인
+  Python Workers WSGI/ASGI 지원을 우선했습니다.
+
+## 실무 체크리스트
+
+- [ ] self-hosted GitHub Actions runner version과 deprecation API 결과를 inventory에 넣는다.
+- [ ] Dependabot alert 조회 workflow는 `vulnerability-alerts: read`만 부여할 수 있는지 확인한다.
+- [ ] npm package publish token을 long-lived secret에서 OIDC trusted publishing으로 옮길 후보를 찾는다.
+- [ ] npm stable, prerelease, staging workflow를 같은 token으로 처리하고 있지 않은지 확인한다.
+- [ ] Python Workers WSGI/ASGI는 작은 internal endpoint부터 cold start, dependency size, logging을 검증한다.
+- [ ] Cloud Run Go 1.27은 GA runtime으로 보고, Agent Platform preview 기능은 PoC와 보안 설계에만 둔다.
+- [ ] Cloud SQL Workforce Identity Federation은 운영자 직접 접속과 BI 접속부터 role mapping을 검토한다.
+- [ ] Docker Engine 29.8.0의 `--umask`, logging attribution, AppArmor/SELinux 변경을 CI runner image에 반영할지
+  결정한다.
+
+## 참고자료
+
+- [GitHub Actions: Early September 2026 updates](https://github.blog/changelog/2026-09-03-github-actions-early-september-2026-updates/)
+- [Multiple trusted publishing configurations for npm](https://github.blog/changelog/2026-09-03-multiple-trusted-publishing-configurations-for-npm/)
+- [Cloudflare Python Workers WSGI/ASGI support](https://developers.cloudflare.com/changelog/post/2026-09-02-python-workers-web-framework-support/)
+- [Cloudflare Docs changelog](https://developers.cloudflare.com/changelog/)
+- [Cloud Run release notes](https://docs.cloud.google.com/run/docs/release-notes)
+- [Cloud SQL for PostgreSQL release notes](https://docs.cloud.google.com/sql/docs/postgres/release-notes)
+- [Docker Engine 29 release notes](https://docs.docker.com/engine/release-notes/29/)
+- [GitHub Copilot model announcements](https://github.blog/changelog/2026-09-04-gpt-6-astra-is-generally-available-in-github-copilot/)
