@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /2026년 9월 둘째 주 IT 기술동향/ })
+    .getByRole("link", { name: /AI agent 실전 운영: 라우터와 평가표/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/weekly-it-trends-2026-09-08\/$/,
+    /\/blog\/posts\/ai-agent-router-eval-2026-09-09\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "2026년 9월 둘째 주 IT 기술동향: CI 가시성, 패키지 신뢰, 서버리스 런타임",
+    "AI agent 실전 운영: 라우터와 평가표로 도구를 고르기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "CI runner 수명, npm trusted publishing, Python Workers, Cloud Run, Cloud SQL 인증, Docker Engine 보안 항목이 운영 점검판에 놓인 이미지",
+    "여러 AI agent가 중앙 라우터, 평가 지표, 승인 게이트, 코드 저장소 경로로 연결된 무텍스트 운영 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /2026년 9월 둘째 주 IT 기술동향/,
+      name: /AI agent 실전 운영: 라우터와 평가표/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Flutter 아홉째 걸음/,
+      name: /Flutter 열째 걸음/,
     }),
   ).toBeVisible();
 });

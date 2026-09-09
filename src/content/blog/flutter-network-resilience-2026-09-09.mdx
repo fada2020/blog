@@ -1,0 +1,324 @@
+---
+title: "Spring Boot 개발자를 위한 Flutter 열째 걸음: 네트워크 실패와 재시도 경계 설계하기"
+description: "Spring Boot의 WebClient, retry, timeout, exception mapping 감각과 비교하며 Flutter에서 http client, repository, UI 상태를 나누는 방법을 정리합니다."
+publishedAt: 2026-09-09T08:58:00+09:00
+draft: false
+category: "Frontend"
+tags: ["Flutter", "Dart", "Spring Boot", "HTTP", "Resilience"]
+kind: "learning"
+heroImage: "../../assets/blog/flutter-network-resilience-2026-09-09/cover.webp"
+heroImageAlt: "Flutter 앱의 화면 상태, repository, HTTP client, 재시도 경로, 취소 신호가 연결된 무텍스트 기술 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 모바일 앱 학습"
+lesson: 10
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 9월 9일에 Flutter SDK archive, Flutter networking 공식 문서, Flutter architecture
+> recommendations, Dart `http` 패키지 문서, pub.dev `flutter_riverpod`와 `go_router` 패키지 정보를
+> 확인했습니다. 기준 stable SDK는 Flutter 3.47.2이고 포함된 Dart SDK는 3.13.2입니다. 예제 기준 패키지는
+> `http` 1.6.0, `flutter_riverpod` 3.4.3, `go_router` 18.0.1입니다. beta, dev, main channel은
+> 안정판처럼 다루지 않았습니다.
+
+## 결론부터 말하면
+
+Flutter에서 네트워크 오류를 잘 다루는 핵심은 `try-catch`를 많이 쓰는 것이 아닙니다. **어떤 실패를 다시
+시도할지, 어떤 실패를 사용자에게 보여줄지, 어떤 실패를 조용히 취소할지**를 repository 경계에서 정하는
+것입니다.
+
+Spring Boot 개발자에게 익숙한 비유로 보면 Controller가 `IOException`, `TimeoutException`, `401`,
+`422`, `503`을 그대로 화면에 흘리지 않는 것과 같습니다. 서버에서는 `WebClient` timeout, retry,
+exception handler, ProblemDetail, circuit breaker를 나누어 둡니다. Flutter에서도 화면 widget이
+HTTP status와 socket 예외를 직접 해석하면 같은 문제가 생깁니다.
+
+이번 글은 아홉째 글의 로컬 저장소와 인증 복원 다음 단계입니다. 저장된 token을 읽고 API를 호출했다면,
+이제 실패를 `NetworkFailure` 같은 앱 언어로 바꾸고 UI는 그 상태만 소비하게 만들어야 합니다.
+
+## 이번 주 개념
+
+Flutter 공식 networking 문서는 `http` 패키지가 cross-platform HTTP 요청을 보내는 가장 단순한 방법이라고
+설명합니다. `http` 패키지 문서는 top-level 함수도 제공하지만, 여러 요청을 보내거나 테스트 가능성을 높이려면
+`Client` 인스턴스를 받는 구조가 낫다고 설명합니다. 또한 `RetryClient`는 기본적으로 503 응답을 최대 세 번
+재시도하고, 일부 request는 abort signal로 취소할 수 있습니다.
+
+오늘의 최소 경계는 네 가지입니다.
+
+| 경계 | 맡는 일 | 맡지 않는 일 |
+|---|---|---|
+| `HttpClient` adapter | HTTP 요청 전송, timeout, raw response | 화면 문구 결정 |
+| repository | status code와 예외를 앱 실패 타입으로 변환 | `BuildContext` 접근 |
+| view model/provider | loading, data, error 상태 노출 | HTTP 세부 구현 |
+| widget | 상태별 UI 표시와 재시도 버튼 연결 | retry 정책 판단 |
+
+이렇게 나누면 네트워크가 흔들릴 때도 화면 코드가 커지지 않습니다. 실패를 처리하는 위치가 매번 달라지는 문제도
+줄어듭니다.
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Spring Boot에서는 외부 API 호출을 Controller에 직접 넣지 않습니다. Service나 client adapter에서 timeout,
+retry, error mapping을 다루고 Controller는 결과 DTO나 앱 예외만 봅니다.
+
+```java
+@Service
+class ArticleQueryService {
+
+    private final ArticleClient articleClient;
+
+    ArticleView loadArticle(String id) {
+        try {
+            return articleClient.fetch(id);
+        } catch (RemoteTimeoutException exception) {
+            throw new ArticleTemporarilyUnavailableException(id);
+        }
+    }
+}
+```
+
+여기서 중요한 점은 `RemoteTimeoutException`이 곧바로 HTML이나 API 응답 문구가 되지 않는다는 것입니다.
+Spring MVC에서는 exception handler가 사용자에게 줄 응답으로 변환합니다. Flutter에서도 같은 방식으로
+HTTP 실패와 화면 상태 사이에 번역 계층을 둬야 합니다.
+
+## Flutter에서는 무엇이 다른가
+
+Flutter 화면은 같은 요청을 여러 번 만들 수 있는 생명주기를 가집니다. 사용자가 뒤로 가거나 다른 탭으로
+이동하면 더 이상 필요 없는 요청이 남을 수 있고, pull-to-refresh와 자동 재시도가 겹칠 수도 있습니다.
+
+<Mermaid title="Flutter 네트워크 실패 처리 경계">
+{`flowchart TD
+  Widget["Widget<br/>button, list, retry"] --> Provider["Provider/ViewModel<br/>loading, data, failure"]
+  Provider --> Repo["Repository<br/>failure mapping"]
+  Repo --> Client["HTTP Client<br/>timeout, retry, cancel"]
+  Client --> Api["Server API"]
+  Api --> Client
+  Client --> Repo
+  Repo --> Provider
+  Provider --> Widget
+  Widget --> Cancel["Route change<br/>request cancel"]
+  Cancel --> Client
+`}
+</Mermaid>
+
+Spring Controller는 요청이 끝나면 사라지지만 Flutter widget은 재빌드됩니다. 그래서 `build()` 안에서
+`http.get()`을 직접 호출하면 같은 요청이 반복될 수 있습니다. repository 함수와 provider를 분리하면
+화면은 "다시 시도" 같은 사용자 행동만 전달하고, 실제 재시도 정책은 데이터 계층에 남습니다.
+
+## 대응 개념 비교
+
+| Spring Boot 관점 | Flutter 관점 | 주의할 점 |
+|---|---|---|
+| `WebClient` 또는 `RestClient` | `http.Client` adapter | 테스트용 fake client를 주입합니다. |
+| `timeout()` | request timeout wrapper | UI loading과 timeout 시간을 섞지 않습니다. |
+| retry filter | `RetryClient` 또는 직접 retry 정책 | 모든 실패를 재시도하지 않습니다. |
+| `@ControllerAdvice` | failure mapper | 서버 status를 화면 문구로 직접 쓰지 않습니다. |
+| request cancellation | route 변경 시 abort | 사용자가 떠난 화면의 응답으로 상태를 덮지 않습니다. |
+
+재시도는 특히 조심해야 합니다. 401, 403, 404, validation 실패는 보통 같은 요청을 반복해도 해결되지
+않습니다. 반대로 503, 네트워크 일시 단절, timeout은 짧은 backoff 후 한두 번 재시도할 가치가 있습니다.
+
+## 최소 실행 예제
+
+먼저 앱이 이해할 실패 타입을 만듭니다.
+
+```dart
+sealed class NetworkFailure {
+  const NetworkFailure();
+}
+
+class OfflineFailure extends NetworkFailure {
+  const OfflineFailure();
+}
+
+class TimeoutFailure extends NetworkFailure {
+  const TimeoutFailure();
+}
+
+class UnauthorizedFailure extends NetworkFailure {
+  const UnauthorizedFailure();
+}
+
+class ServerFailure extends NetworkFailure {
+  const ServerFailure(this.statusCode);
+
+  final int statusCode;
+}
+```
+
+그 다음 `http.Client`를 직접 감싼 작은 API client를 둡니다. 테스트하기 쉽도록 client는 생성자에서 받습니다.
+
+```dart
+import "dart:async";
+import "dart:convert";
+import "dart:io";
+
+import "package:http/http.dart" as http;
+
+class ArticleApiClient {
+  ArticleApiClient({
+    required http.Client client,
+    required Uri baseUri,
+  })  : _client = client,
+        _baseUri = baseUri;
+
+  final http.Client _client;
+  final Uri _baseUri;
+
+  Future<Map<String, Object?>> fetchArticle(String id) async {
+    final uri = _baseUri.replace(path: "/articles/$id");
+
+    try {
+      final response = await _client
+          .get(uri)
+          .timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 401) {
+        throw const UnauthorizedFailure();
+      }
+
+      if (response.statusCode >= 500) {
+        throw ServerFailure(response.statusCode);
+      }
+
+      if (response.statusCode >= 400) {
+        throw ServerFailure(response.statusCode);
+      }
+
+      return jsonDecode(response.body) as Map<String, Object?>;
+    } on TimeoutException {
+      throw const TimeoutFailure();
+    } on SocketException {
+      throw const OfflineFailure();
+    }
+  }
+}
+```
+
+여기서 `ArticleApiClient`는 raw JSON까지만 책임집니다. domain model과 화면 상태는 repository에서 정리합니다.
+
+```dart
+class ArticleRepository {
+  ArticleRepository(this._client);
+
+  final ArticleApiClient _client;
+
+  Future<Article> getArticle(String id) async {
+    final json = await _client.fetchArticle(id);
+
+    return Article(
+      id: json["id"] as String,
+      title: json["title"] as String,
+      body: json["body"] as String,
+    );
+  }
+}
+```
+
+`RetryClient`가 필요한 경우에는 모든 요청이 아니라 재시도해도 안전한 읽기 요청부터 적용합니다.
+
+```dart
+import "package:http/http.dart" as http;
+import "package:http/retry.dart";
+
+http.Client resilientClient() {
+  return RetryClient(
+    http.Client(),
+    retries: 2,
+    when: (response) => response.statusCode == 503,
+    whenError: (error, stackTrace) => error is TimeoutException,
+  );
+}
+```
+
+POST, 결제, 주문, 삭제 요청처럼 side effect가 있는 작업은 같은 retry 정책을 그대로 붙이면 위험합니다.
+Spring Boot에서 idempotency key 없이 외부 결제 API를 재시도하지 않는 것과 같은 이유입니다.
+
+## Riverpod에서 화면 상태로 바꾸기
+
+Riverpod을 쓰면 repository의 `Future` 결과를 `AsyncValue`로 다루기 쉽습니다.
+
+```dart
+final articleRepositoryProvider = Provider<ArticleRepository>((ref) {
+  return ArticleRepository(ref.watch(articleApiClientProvider));
+});
+
+final articleProvider = FutureProvider.family<Article, String>((ref, id) {
+  return ref.watch(articleRepositoryProvider).getArticle(id);
+});
+```
+
+화면은 실패 타입을 직접 만들지 않고, 이미 만들어진 상태를 표시합니다.
+
+```dart
+class ArticleScreen extends ConsumerWidget {
+  const ArticleScreen({required this.articleId, super.key});
+
+  final String articleId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final article = ref.watch(articleProvider(articleId));
+
+    return switch (article) {
+      AsyncData(:final value) => ArticleBody(article: value),
+      AsyncError(:final error) => ErrorView(
+          message: messageFor(error),
+          onRetry: () => ref.invalidate(articleProvider(articleId)),
+        ),
+      _ => const LoadingView(),
+    };
+  }
+}
+```
+
+`messageFor()`는 UI layer에 있어도 되지만, HTTP status code 자체가 아니라 앱 실패 타입을 입력으로 받는 편이
+좋습니다.
+
+```dart
+String messageFor(Object error) {
+  return switch (error) {
+    OfflineFailure() => "네트워크 연결을 확인해 주세요.",
+    TimeoutFailure() => "응답이 지연되고 있습니다. 잠시 뒤 다시 시도해 주세요.",
+    UnauthorizedFailure() => "로그인이 만료되었습니다.",
+    ServerFailure() => "일시적인 서버 오류입니다.",
+    _ => "요청을 처리하지 못했습니다.",
+  };
+}
+```
+
+## Java 개발자가 자주 하는 오해
+
+- `http.get()`을 `build()` 안에서 바로 부르면 요청과 렌더링 생명주기가 섞입니다.
+- 모든 5xx를 무제한 재시도하면 서버 장애를 더 키울 수 있습니다.
+- 401은 retry가 아니라 인증 상태 전환 문제입니다.
+- 사용자가 화면을 떠난 뒤 도착한 응답으로 최신 상태를 덮으면 안 됩니다.
+- `AsyncValue`나 loading widget만으로 네트워크 정책이 생기지는 않습니다.
+
+## 연습 문제
+
+1. 위 예제에서 422 validation error를 `ValidationFailure`로 분리해 보세요.
+2. 읽기 요청에는 retry를 붙이고 쓰기 요청에는 붙이지 않는 이유를 Spring Boot의 idempotency 관점에서
+   설명해 보세요.
+3. route가 바뀌었을 때 진행 중인 상세 조회를 취소하는 구조를 `AbortableRequest` 또는 provider dispose
+   흐름으로 설계해 보세요.
+
+## 실무 체크리스트
+
+- [ ] HTTP client를 widget 안에서 만들지 않는다.
+- [ ] repository가 raw status code를 앱 실패 타입으로 바꾼다.
+- [ ] retry 대상은 GET 같은 idempotent 요청부터 제한한다.
+- [ ] timeout 시간과 loading UI 시간을 별도로 정한다.
+- [ ] 401은 인증 repository와 router로 전달한다.
+- [ ] fake `http.Client`로 success, timeout, 401, 503 테스트를 작성한다.
+- [ ] 화면 이동이나 provider dispose 시 stale response가 상태를 덮지 않는지 확인한다.
+
+## 참고자료
+
+- [Flutter SDK archive](https://docs.flutter.dev/install/archive)
+- [Flutter networking](https://docs.flutter.dev/data-and-backend/networking)
+- [Flutter architecture recommendations](https://docs.flutter.dev/app-architecture/recommendations)
+- [http package](https://pub.dev/packages/http)
+- [flutter_riverpod package](https://pub.dev/packages/flutter_riverpod)
+- [go_router package](https://pub.dev/packages/go_router)

@@ -1,0 +1,175 @@
+---
+title: "AI agent 실전 운영: 라우터와 평가표로 도구를 고르기"
+description: "Codex, Claude Code, GitHub Copilot, Gemini CLI, Grok 계열을 한 줄 순위가 아니라 라우팅, 평가, 비용, 승인 흐름으로 비교합니다."
+publishedAt: 2026-09-09T09:01:00+09:00
+draft: false
+category: "Tooling"
+tags: ["AI Agent", "Codex", "Claude Code", "GitHub Copilot", "Gemini"]
+kind: "trend"
+heroImage: "../../assets/blog/ai-agent-router-eval-2026-09-09/cover.webp"
+heroImageAlt: "여러 AI agent가 중앙 라우터, 평가 지표, 승인 게이트, 코드 저장소 경로로 연결된 무텍스트 운영 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 범위**
+>
+> 2026년 9월 9일에 OpenAI Codex 제품 페이지와 Agents SDK 문서, OpenAI agent eval 문서, Anthropic
+> Claude Code 문서, GitHub Copilot cloud agent 문서와 2026년 9월 첫째 주 GitHub AI 글, Google Cloud
+> Gemini CLI와 Gemini Enterprise Agent Platform 문서, Google Gemini 3 Code Assist 문서, xAI Grok
+> 모델 문서, SWE-bench, Terminal-Bench, Artificial Analysis coding agent benchmark를 확인했습니다.
+> public preview, beta, research preview는 안정 운영 기능처럼 다루지 않았습니다.
+
+## 결론부터 말하면
+
+AI coding agent는 이제 "한 도구를 골라 모든 일을 맡기는" 문제가 아닙니다. OpenAI는 Codex를 ChatGPT,
+editor, terminal, cloud workflow로 연결하고, Claude Code는 terminal, IDE, desktop, web, CI와 chat
+surface를 넓히고 있습니다. GitHub는 Copilot 안에서 multi-model orchestration과 비용 효율을 강조하고,
+Google은 Gemini CLI와 Agent Platform을 build, scale, govern, optimize 축으로 정리합니다.
+
+따라서 Spring Boot 팀이 이번 주에 잡아야 할 질문은 이것입니다.
+
+> 우리 팀의 agent workflow는 **라우터, 평가표, 승인 게이트**를 갖고 있는가?
+
+모델 이름 하나만 바꾸면 좋아지는 작업도 있습니다. 하지만 repository 수정, migration, 장애 대응 문서, PR
+리뷰처럼 실패 비용이 있는 작업은 다릅니다. agent가 잘하는 일을 라우팅하고, 같은 기준으로 평가하고, 위험한
+명령은 사람이 승인해야 합니다.
+
+## 이번 주 비교 축
+
+| 축 | 최근 확인한 흐름 | Spring Boot 팀에서 볼 질문 |
+|---|---|---|
+| Codex | ChatGPT, IDE, terminal, cloud task를 하나의 coding agent 흐름으로 연결 | local test와 background 작업을 어떻게 나눌 것인가 |
+| Claude Code | terminal, IDE, desktop, web, mobile, Slack, CI/CD 연결을 강조 | 긴 코드 읽기와 PR 생성까지 같은 규칙을 적용할 것인가 |
+| GitHub Copilot | HydraFusion research preview와 cost-efficient coding workflow를 공개 | PR 중심 작업에서 multi-agent를 어디까지 허용할 것인가 |
+| Gemini | CLI는 ReAct loop와 MCP를 쓰고, Agent Platform은 governance와 eval을 전면에 둠 | GCP 권한, audit, agent identity를 어떻게 묶을 것인가 |
+| Grok | Grok 4.6은 coding, agentic task, 긴 context, tool calling을 내세움 | 긴 context 비용과 검색 도구 의존을 어떻게 제한할 것인가 |
+| 공개 benchmark | Artificial Analysis는 성능, token, 비용, 실행 시간을 함께 비교 | public score와 내부 task score를 어떻게 분리할 것인가 |
+
+이 표는 순위표가 아닙니다. 같은 모델도 terminal harness, IDE harness, cloud PR harness 안에서 결과가 달라집니다.
+Artificial Analysis가 같은 underlying model이라도 harness별 차이를 비교하는 이유도 여기에 있습니다.
+
+## 라우터는 멋진 구조가 아니라 비용 절감 장치입니다
+
+OpenAI Agents SDK quickstart는 하나의 agent로 시작한 뒤 필요할 때 도구와 specialist agent를 추가하는 흐름을
+보여줍니다. 중요한 점은 처음부터 거대한 multi-agent 구조를 만들라는 뜻이 아니라, task가 커질수록 누가
+어떤 일을 맡을지 명시하라는 뜻입니다.
+
+Spring Boot 팀의 agent router는 복잡할 필요가 없습니다.
+
+<Mermaid title="AI agent 라우팅과 평가 흐름">
+{`flowchart TD
+  Request["작업 요청"] --> Router["Router<br/>작업 유형 분류"]
+  Router --> Local["Local coding agent<br/>작은 patch, test"]
+  Router --> Cloud["Cloud background agent<br/>독립 issue, PR"]
+  Router --> Review["Review agent<br/>diff, risk, docs"]
+  Router --> Research["Research agent<br/>공식 문서, benchmark"]
+  Local --> Eval["공통 평가표"]
+  Cloud --> Eval
+  Review --> Eval
+  Research --> Eval
+  Eval --> Approval["사람 승인<br/>권한, 배포, 비용"]
+  Approval --> Ship["merge 또는 rollback"]
+`}
+</Mermaid>
+
+작업 유형은 네 가지 정도면 충분합니다.
+
+| 작업 유형 | 먼저 줄 agent | 이유 |
+|---|---|---|
+| failing unit test 수정 | local CLI agent | 현재 checkout, test fixture, 빠른 diff 확인이 중요합니다. |
+| 문서와 공식 자료 조사 | research/browser agent | 출처와 날짜를 남기는 일이 핵심입니다. |
+| GitHub issue 기반 작은 PR | cloud PR agent | branch, commit, PR 증적이 자연스럽게 남습니다. |
+| 큰 refactor 검토 | review agent 먼저 | 바로 수정하기 전에 위험 범위와 test gap을 잡아야 합니다. |
+
+라우터가 없으면 비싼 모델이 사소한 문서 검색을 하고, 빠른 IDE agent가 배포 권한이 걸린 변경을 만질 수
+있습니다. 라우터는 지능을 높이는 장치라기보다 실패 비용을 낮추는 장치입니다.
+
+## 평가표는 benchmark보다 먼저 작아야 합니다
+
+SWE-bench는 실제 GitHub issue 기반 문제 해결 능력을 보고, Terminal-Bench는 terminal 환경에서 agent가
+multi-step 작업을 해내는지 봅니다. Artificial Analysis coding agent index는 여러 benchmark를 묶어 성능,
+token 사용량, 비용, 실행 시간을 함께 비교합니다.
+
+이 공개 benchmark는 후보를 좁히는 데 유용합니다. 하지만 Spring Boot 팀의 최종 선택은 내부 평가표로 해야
+합니다. 예를 들어 아래 다섯 작업을 모든 agent에 같은 입력으로 줍니다.
+
+1. Controller validation 하나를 추가하고 unit test를 통과시킨다.
+2. JPA query 조건 하나를 바꾸고 기존 pagination 동작을 보존한다.
+3. Gradle dependency 충돌 원인을 설명하고 최소 diff를 제안한다.
+4. 실패한 GitHub Actions 로그에서 실제 실패 지점을 찾는다.
+5. 운영 runbook 문장을 공개 가능한 수준으로 일반화한다.
+
+평가 항목도 작게 둡니다.
+
+| 항목 | 측정 방식 |
+|---|---|
+| 정확도 | 요구사항 충족과 테스트 통과 |
+| diff 크기 | 요청과 무관한 변경 수 |
+| 시간 | agent wall time과 대기 시간 |
+| 비용 | token, cloud runtime, 재시도 횟수 |
+| 승인 품질 | 위험 명령 앞에서 멈췄는가 |
+| 리뷰 가능성 | 사람이 10분 안에 이해할 수 있는가 |
+
+여기서 1등 agent를 하나 고르지 않아도 됩니다. 한 agent는 구현, 다른 agent는 리뷰, 또 다른 agent는 공식 문서
+조사에 맞을 수 있습니다.
+
+## 승인 게이트는 agent마다 같은 언어로 맞춥니다
+
+Claude Code 문서는 local terminal과 CLI tool, MCP server를 함께 쓰는 흐름을 설명하고, 변경과 명령 실행 전
+권한 확인을 강조합니다. Codex도 local, cloud, IDE workflow를 제공하므로 실제 repository 권한과 연결됩니다.
+Gemini Agent Platform은 Agent Identity, Agent Gateway, governance policy, observability, agent evaluation을
+한 축으로 묶습니다.
+
+도구 이름이 달라도 승인 언어는 같아야 합니다.
+
+| 작업 | 기본 정책 |
+|---|---|
+| 파일 읽기, `rg`, `git diff`, unit test | 허용 |
+| formatting, build, local dev server | 저장소별 허용 |
+| dependency 추가, migration 생성, e2e | 명시 승인 또는 제한 허용 |
+| production secret, deploy, Terraform apply | 사람 승인 필수 |
+| 계정, 결제, 실제 사용자 데이터 export | agent 금지 |
+
+이 정책을 `AGENTS.md`, `CLAUDE.md`, repository README, GitHub issue template 중 실제 agent가 읽는 위치에
+둬야 합니다. 문서가 흩어져 있으면 agent별로 다른 기준을 따릅니다.
+
+## 이번 주 후보와 제외 이유
+
+- GitHub HydraFusion은 2026년 9월 4일 research preview로 공개되어 multi-model orchestration 흐름을 보여주지만,
+  preview이므로 안정 운영 기능으로 단정하지 않았습니다.
+- Gemini 3.1 Pro in Code Assist는 public preview이고, Gemini 3.5 Flash는 GA로 표시되어 있습니다. 따라서
+  본문에서는 "Gemini 계열은 모델 선택보다 license, quota, preview channel 확인이 먼저"라는 판단 근거로만
+  사용했습니다.
+- Grok 4.6은 xAI 공식 문서 기준 coding과 agentic task를 내세우고 500k context와 token 가격을 공개하지만,
+  직전 AI agent 글에서 개인 구독과 Grok 비교를 이미 깊게 다뤘으므로 이번 글에서는 router 후보 중 하나로만
+  남겼습니다.
+- 단일 블로그의 agent 순위표와 출처 없는 벤치마크 캡처는 근거로 쓰지 않았습니다.
+
+## 오늘 바로 적용할 운영 규칙
+
+1. agent에게 줄 작업을 `수정`, `리뷰`, `조사`, `운영` 네 유형으로 먼저 분류합니다.
+2. 같은 작업을 여러 agent에게 반복시키지 말고, 구현 agent와 review agent의 역할을 분리합니다.
+3. public benchmark는 후보 선정에만 쓰고, repository 내부 task 5개로 작은 eval을 만듭니다.
+4. 비용은 월 구독료나 API 단가가 아니라 완료된 안전한 변경 하나의 총비용으로 기록합니다.
+5. preview, beta, research preview 기능은 production workflow의 기본값으로 두지 않습니다.
+6. 배포, secret, 계정, 결제, 실제 사용자 데이터 export는 agent가 제안만 하고 사람이 실행합니다.
+
+## 참고자료
+
+- [OpenAI Codex](https://openai.com/codex/)
+- [OpenAI Agents SDK quickstart](https://developers.openai.com/api/docs/guides/agents/quickstart)
+- [OpenAI agent evals](https://developers.openai.com/api/docs/guides/agent-evals)
+- [Claude Code overview](https://docs.anthropic.com/en/docs/claude-code/overview)
+- [GitHub Copilot cloud agent](https://docs.github.com/en/copilot/concepts/agents/cloud-agent/about-cloud-agent)
+- [Project HydraFusion: Frontier quality via multi-model orchestration](https://github.blog/ai-and-ml/generative-ai/project-hydrafusion-frontier-quality-via-multi-model-orchestration/)
+- [How we make AI coding more cost efficient without sacrificing task quality](https://github.blog/ai-and-ml/github-copilot/how-we-make-ai-coding-more-cost-efficient-without-sacrificing-task-quality/)
+- [Gemini CLI](https://docs.cloud.google.com/gemini/docs/codeassist/gemini-cli)
+- [Gemini Enterprise Agent Platform overview](https://docs.cloud.google.com/gemini-enterprise-agent-platform/overview)
+- [Gemini 3 in Gemini Code Assist](https://docs.cloud.google.com/gemini/docs/codeassist/gemini-3)
+- [Grok models](https://docs.x.ai/developers/models)
+- [SWE-bench leaderboards](https://www.swebench.com/)
+- [Terminal-Bench](https://www.tbench.ai/)
+- [Artificial Analysis coding agents](https://artificialanalysis.ai/agents/coding-agents)
