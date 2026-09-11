@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /API 트래픽 모니터링 회고/ })
+    .getByRole("link", { name: /24개월 아이 케어/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/uptime-log-noise-detail-retrospective-2026-09-10\/$/,
+    /\/blog\/posts\/toddler-autumn-weekend-rhythm-2026-09-11\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "API 트래픽 모니터링 회고: 헬스체크 노이즈와 상세 저장 기준 분리하기",
+    "24개월 아이 케어: 가을 초입 주말 리듬을 작게 설계하기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "API 요청 흐름에서 uptime probe가 필터링되고 실제 요청 상세가 보안 저장소와 운영 콘솔로 분리되는 무텍스트 관측성 다이어그램",
+    "24개월 아이의 지원 제도, 건강 체크, 예약형 실내 놀이, 회복일을 나누어 보는 무텍스트 주말 플랜 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /API 트래픽 모니터링 회고/,
+      name: /24개월 아이 케어/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Kotlin 여덟째 걸음/,
+      name: /Kotlin 아홉째 걸음/,
     }),
   ).toBeVisible();
 });
