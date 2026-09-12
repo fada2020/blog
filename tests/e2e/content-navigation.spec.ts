@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /24개월 아이 케어/ })
+    .getByRole("link", { name: /CPI, 금리/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/toddler-autumn-weekend-rhythm-2026-09-11\/$/,
+    /\/blog\/posts\/saturday-market-cpi-yields-chip-exports-2026-09-12\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "24개월 아이 케어: 가을 초입 주말 리듬을 작게 설계하기",
+    "토요일 주식 학습: CPI, 금리, 반도체 수출 같이 보기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "24개월 아이의 지원 제도, 건강 체크, 예약형 실내 놀이, 회복일을 나누어 보는 무텍스트 주말 플랜 다이어그램",
+    "미국 CPI, 국채금리, 유가, 달러 원 환율, 코스피와 한국 반도체 수출이 연결된 무텍스트 시장 리스크 지도",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /24개월 아이 케어/,
+      name: /CPI, 금리/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Kotlin 아홉째 걸음/,
+      name: /Kotlin 열째 걸음/,
     }),
   ).toBeVisible();
 });
@@ -150,7 +150,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("학습 글");
   await expect(
     page.getByRole("link", {
-      name: /Spring Boot 개발자를 위한 Flutter 여섯째 걸음/,
+      name: /Spring Boot 개발자를 위한 Kotlin 열째 걸음/,
     }),
   ).toBeVisible();
 
@@ -158,7 +158,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page).toHaveURL(/\/blog\/kinds\/learning\/page\/2\/$/);
   await expect(
     page.getByRole("link", {
-      name: "Spring Boot 개발자를 위한 Flutter 넷째 걸음: Form validation과 입력 상태 다루기",
+      name: "Spring Boot 개발자를 위한 Flutter 여섯째 걸음: Riverpod으로 앱 상태 나누기",
     }),
   ).toBeVisible();
 });
