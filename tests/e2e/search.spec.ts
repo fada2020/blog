@@ -9,15 +9,15 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(63);
+  expect(entries).toHaveLength(65);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "토요일 주식 학습: CPI, 금리, 반도체 수출 같이 보기",
+    "일요일 주식 학습: FOMC 전 리스크 지도 그리기",
   );
   expect(entries[0].href).toBe(
-    "/blog/posts/saturday-market-cpi-yields-chip-exports-2026-09-12/",
+    "/blog/posts/sunday-fomc-risk-map-2026-09-13/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });

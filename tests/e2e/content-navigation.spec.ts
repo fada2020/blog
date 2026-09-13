@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /CPI, 금리/ })
+    .getByRole("link", { name: /FOMC 전/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/saturday-market-cpi-yields-chip-exports-2026-09-12\/$/,
+    /\/blog\/posts\/sunday-fomc-risk-map-2026-09-13\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "토요일 주식 학습: CPI, 금리, 반도체 수출 같이 보기",
+    "일요일 주식 학습: FOMC 전 리스크 지도 그리기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "미국 CPI, 국채금리, 유가, 달러 원 환율, 코스피와 한국 반도체 수출이 연결된 무텍스트 시장 리스크 지도",
+    "FOMC 일정, 미국 CPI, 고용, 국채금리, 유가, 달러 원 환율, 한국 반도체 수출이 시나리오별로 나뉜 무텍스트 시장 리스크 지도",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /CPI, 금리/,
+      name: /FOMC 전/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Kotlin 열째 걸음/,
+      name: /CI\/CD trace context/,
     }),
   ).toBeVisible();
 });
