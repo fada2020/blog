@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /FOMC 전/ })
+    .getByRole("link", { name: /비상금과 예금금리/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/sunday-fomc-risk-map-2026-09-13\/$/,
+    /\/blog\/posts\/monday-money-emergency-fund-rate-spread-2026-09-14\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "일요일 주식 학습: FOMC 전 리스크 지도 그리기",
+    "월요일 경제 기초: 비상금과 예금금리 사이의 기회비용 읽기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "FOMC 일정, 미국 CPI, 고용, 국채금리, 유가, 달러 원 환율, 한국 반도체 수출이 시나리오별로 나뉜 무텍스트 시장 리스크 지도",
+    "비상금, 예금금리, 물가상승률, 대출금리, 현금흐름이 하나의 개인 재무 대시보드로 연결된 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /FOMC 전/,
+      name: /비상금과 예금금리/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /CI\/CD trace context/,
+      name: /offline-first 캐시 경계/,
     }),
   ).toBeVisible();
 });
