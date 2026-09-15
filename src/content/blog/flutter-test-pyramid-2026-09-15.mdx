@@ -1,0 +1,280 @@
+---
+title: "Spring Boot 개발자를 위한 Flutter 열두째 걸음: 테스트 피라미드 세우기"
+description: "JUnit과 MockMvc에 익숙한 개발자 관점에서 Flutter의 unit, widget, integration test 경계와 WidgetTester 사용법을 정리합니다."
+publishedAt: 2026-09-15T08:55:00+09:00
+draft: false
+category: "Frontend"
+tags: ["Flutter", "Dart", "Spring Boot", "Testing", "WidgetTester"]
+kind: "learning"
+heroImage: "../../assets/blog/flutter-test-pyramid-2026-09-15/cover.webp"
+heroImageAlt: "Flutter 테스트 피라미드, unit test, widget test, integration test가 앱 화면과 연결된 무텍스트 기술 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 모바일 앱 학습"
+lesson: 12
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 9월 15일에 Flutter 공식 testing overview, unit/widget/integration testing cookbook,
+> `flutter_test` API 문서와 `WidgetTester` 문서를 확인했습니다. Flutter API 문서는 Flutter 3.47.2를
+> 기준으로 표시되어 있습니다. 이 글은 SDK에 포함된 `flutter_test`와 `integration_test` 흐름을 기준으로 하며,
+> beta/dev/main channel 기능을 안정 기능처럼 다루지 않았습니다.
+
+## 결론부터 말하면
+
+Flutter 테스트는 "화면을 띄워서 한번 눌러 본다"로 시작하면 금방 느려집니다. Spring Boot에서 모든 검증을
+`@SpringBootTest`로만 만들면 작은 로직 변경도 전체 context를 띄우느라 무거워지는 것과 같습니다.
+
+Flutter에서도 먼저 **순수 Dart 로직은 unit test, widget의 표시와 상호작용은 widget test, 실제 앱 조립과
+기기 경계는 integration test**로 나누는 편이 좋습니다. 이 경계가 잡히면 repository, view model, widget이
+서로의 책임을 침범하는지 테스트가 먼저 알려 줍니다.
+
+지난 글에서 offline-first repository 경계를 정했다면, 이번 글은 그 경계를 어떻게 깨지지 않게 확인할지 다룹니다.
+
+## 이번 주 개념
+
+Flutter 공식 testing overview는 세 가지 테스트 유형을 구분합니다.
+
+| 테스트 | 검증 대상 | Spring Boot에 비유하면 |
+|---|---|---|
+| unit test | 함수, method, class 하나 | service method, domain object test |
+| widget test | widget UI와 interaction | controller slice 또는 view component test |
+| integration test | 앱 전체 또는 큰 흐름 | end-to-end, `@SpringBootTest` + 실제 client |
+
+핵심은 속도와 신뢰도의 균형입니다. 많은 케이스는 unit test와 widget test에서 빠르게 잡고, integration test는
+"진짜 앱으로 연결했을 때 깨지는가"만 확인해야 합니다.
+
+<Mermaid title="Flutter 테스트 피라미드">
+{`flowchart TD
+  Unit["Unit test<br/>Dart logic"] --> Widget["Widget test<br/>UI state and interaction"]
+  Widget --> Integration["Integration test<br/>whole app flow"]
+
+  Repo["Repository"] --> Unit
+  ViewModel["ViewModel"] --> Unit
+  Screen["Screen widget"] --> Widget
+  App["App composition"] --> Integration
+
+  Unit --> Fast["fast feedback"]
+  Widget --> Contract["visible contract"]
+  Integration --> Confidence["device confidence"]
+`}
+</Mermaid>
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Spring Boot 팀은 보통 다음 감각을 이미 갖고 있습니다.
+
+```java
+class PricePolicyTest {
+
+    @Test
+    void appliesDiscountOnlyForEligibleMember() {
+        PricePolicy policy = new PricePolicy();
+
+        Money result = policy.apply(member("gold"), Money.wons(10_000));
+
+        assertThat(result).isEqualTo(Money.wons(9_000));
+    }
+}
+```
+
+이 테스트는 DB, HTTP, Spring context를 몰라도 됩니다. 반대로 controller mapping, security filter, JSON 직렬화는
+다른 테스트가 맡습니다. Flutter도 같습니다. `CartTotalCalculator` 같은 순수 Dart class는 widget tree 없이
+검증하고, `CartScreen`이 badge와 button을 제대로 보여 주는지만 widget test가 확인합니다.
+
+## Flutter에서는 무엇이 다른가
+
+Flutter의 widget test는 실제 기기 없이도 widget tree를 만들고, 찾고, 누르고, rebuild할 수 있습니다. 공식 문서는
+`flutter_test`가 `WidgetTester`, `testWidgets`, Finder, widget matcher를 제공한다고 설명합니다.
+
+Spring MVC 테스트가 request를 만들어 controller를 통과시키듯, widget test는 `tester.pumpWidget()`으로 화면 조각을
+올린 뒤 `find.text`, `find.byType`, `tester.tap`, `tester.enterText`로 사용자의 행동을 흉내 냅니다. 다만 Flutter
+테스트 환경은 자동으로 매 frame을 흘려보내지 않습니다. 상태가 바뀌거나 animation이 있다면 `pump()` 또는
+`pumpAndSettle()`로 rebuild를 명시해야 합니다.
+
+## 대응 개념 비교
+
+| Spring Boot 테스트 | Flutter 테스트 | 경계 |
+|---|---|---|
+| domain/service unit test | Dart unit test | platform, widget, file IO를 섞지 않습니다. |
+| `@WebMvcTest` + MockMvc | widget test | 화면 표시와 interaction contract를 봅니다. |
+| fake repository | fake data source/view model | network와 local storage를 대체합니다. |
+| `@SpringBootTest` | integration test | 앱 조립, navigation, 실제 plugin 경계를 확인합니다. |
+| Testcontainers | emulator/device + test backend | 느리므로 핵심 happy path와 failure path만 남깁니다. |
+
+테스트가 실패했을 때 원인이 바로 보여야 합니다. unit test 실패는 계산식이나 상태 전이가 문제여야 하고, widget test
+실패는 화면 contract가 바뀐 것이어야 합니다. integration test가 자주 깨진다면 작은 테스트가 맡을 일을 너무 위에
+올린 신호일 수 있습니다.
+
+## 최소 실행 예제: repository는 unit test로 먼저 잠급니다
+
+offline-first 글에서 본 repository를 아주 작게 줄여 보겠습니다.
+
+```dart
+sealed class LoadState<T> {
+  const LoadState();
+}
+
+class Fresh<T> extends LoadState<T> {
+  const Fresh(this.value);
+  final T value;
+}
+
+class Cached<T> extends LoadState<T> {
+  const Cached(this.value);
+  final T value;
+}
+
+class ArticleRepository {
+  ArticleRepository(this.remote, this.local);
+
+  final ArticleRemote remote;
+  final ArticleLocal local;
+
+  Future<LoadState<Article>> getArticle(String id) async {
+    try {
+      final article = await remote.fetch(id);
+      await local.save(article);
+      return Fresh(article);
+    } catch (_) {
+      final cached = await local.find(id);
+      if (cached == null) rethrow;
+      return Cached(cached);
+    }
+  }
+}
+```
+
+이 로직은 widget이 필요 없습니다.
+
+```dart
+void main() {
+  test('remote 실패 시 cached article을 반환한다', () async {
+    final cached = Article(id: 'a1', title: 'Local copy');
+    final repository = ArticleRepository(
+      FailingArticleRemote(),
+      MemoryArticleLocal({'a1': cached}),
+    );
+
+    final result = await repository.getArticle('a1');
+
+    expect(result, isA<Cached<Article>>());
+    expect((result as Cached<Article>).value.title, 'Local copy');
+  });
+}
+```
+
+여기서 fake는 작아야 합니다. mocking framework를 쓰더라도 테스트가 "몇 번 호출했는가"만 보게 만들면 구현 세부사항에
+붙습니다. 이 경우 더 중요한 contract는 remote 실패 때 화면에 줄 상태가 `Cached`인지입니다.
+
+## WidgetTester로 화면 contract를 확인합니다
+
+이제 화면이 `Cached` 상태를 어떻게 표시하는지 봅니다.
+
+```dart
+class ArticleScreen extends StatelessWidget {
+  const ArticleScreen({super.key, required this.state, required this.onRetry});
+
+  final LoadState<Article> state;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Scaffold(
+        body: switch (state) {
+          Fresh(:final value) => Text(value.title),
+          Cached(:final value) => Column(
+              children: [
+                Text(value.title),
+                const Text('오프라인 사본'),
+                ElevatedButton(onPressed: onRetry, child: const Text('다시 시도')),
+              ],
+            ),
+        },
+      ),
+    );
+  }
+}
+```
+
+widget test는 사용자가 볼 contract를 확인합니다.
+
+```dart
+void main() {
+  testWidgets('cached 상태는 badge와 retry button을 보여 준다', (tester) async {
+    var retryCount = 0;
+
+    await tester.pumpWidget(
+      ArticleScreen(
+        state: Cached(Article(id: 'a1', title: 'Local copy')),
+        onRetry: () => retryCount += 1,
+      ),
+    );
+
+    expect(find.text('Local copy'), findsOneWidget);
+    expect(find.text('오프라인 사본'), findsOneWidget);
+
+    await tester.tap(find.text('다시 시도'));
+    await tester.pump();
+
+    expect(retryCount, 1);
+  });
+}
+```
+
+이 테스트는 API client가 어떤 package를 쓰는지 모릅니다. 대신 화면이 사용자에게 약속한 문구와 action을 지키는지
+확인합니다. Spring Boot로 치면 HTTP client timeout policy가 아니라 response body contract를 보는 테스트입니다.
+
+## integration test는 적게, 하지만 끊기면 안 되는 길에 둡니다
+
+Flutter 공식 문서는 integration test가 전체 앱 또는 큰 부분의 동작을 검증한다고 설명합니다. 보통 실제 device나
+emulator에서 앱과 test driver가 분리되어 동작합니다. 그래서 빠른 feedback용이 아닙니다.
+
+integration test 후보는 이런 흐름입니다.
+
+- 앱 시작 후 로그인 화면이 뜬다.
+- offline cache가 있는 상태에서 네트워크 실패를 만나도 목록이 비지 않는다.
+- 상세 화면으로 이동했다가 뒤로 가면 scroll 위치나 선택 상태가 보존된다.
+- 핵심 결제, 예약, 제출 같은 업무 흐름이 마지막 확인 화면까지 간다.
+
+반대로 button 색, 문구 하나, repository fallback 하나를 integration test로만 확인하면 유지비가 큽니다. 작은 테스트로
+쪼개고, integration test는 "조립이 맞는가"를 보는 최종 관문으로 남기는 편이 좋습니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫째, widget test를 screenshot test처럼만 생각하기 쉽습니다. 하지만 widget test는 tap, drag, text input, rebuild까지
+다룰 수 있습니다. 보이는 contract와 interaction을 같이 확인하세요.
+
+둘째, `pumpAndSettle()`을 모든 곳에 붙이면 안정적이라고 믿기 쉽습니다. animation이나 stream이 계속 돌면 settle되지
+않을 수 있습니다. 상태 변화가 한 frame이면 `pump()`가 더 선명합니다.
+
+셋째, 모든 dependency를 mock으로 바꾸려다 테스트가 호출 순서에 묶입니다. repository나 view model 경계에서는 fake
+구현이 더 읽기 쉬울 때가 많습니다.
+
+넷째, integration test를 적게 두는 것을 품질 포기로 오해할 수 있습니다. 실제로는 작은 테스트가 충분히 많고,
+integration test가 핵심 조립만 검증할 때 전체 suite가 더 오래 살아남습니다.
+
+## 연습 문제
+
+1. 최근 만든 화면 하나를 고르고, 계산 로직 하나를 pure Dart function 또는 class로 뽑아 unit test를 작성해 봅니다.
+2. loading, success, empty, cached, error 중 두 상태를 고르고 widget test로 표시 문구와 button을 확인합니다.
+3. `pump()`와 `pumpAndSettle()`을 각각 써 보고, 어떤 상황에서 기다림이 달라지는지 기록합니다.
+4. 실제 device에서 꼭 확인해야 하는 흐름 하나만 골라 integration test 후보로 남깁니다.
+
+## 다음 글 예고
+
+다음 Flutter 글에서는 앱이 커졌을 때 route, repository, state, test가 한 폴더에 섞이지 않도록 feature-first 구조와
+작은 module 경계를 잡는 방법을 이어서 보겠습니다.
+
+## 참고자료
+
+- [Testing Flutter apps](https://docs.flutter.dev/testing/overview)
+- [An introduction to unit testing](https://docs.flutter.dev/cookbook/testing/unit/introduction)
+- [An introduction to widget testing](https://docs.flutter.dev/cookbook/testing/widget/introduction)
+- [Tap, drag, and enter text](https://docs.flutter.dev/cookbook/testing/widget/tap-drag)
+- [Integration testing concepts](https://docs.flutter.dev/cookbook/testing/integration/introduction)
+- [WidgetTester class](https://api.flutter.dev/flutter/flutter_test/WidgetTester-class.html)

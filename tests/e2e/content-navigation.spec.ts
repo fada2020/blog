@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /비상금과 예금금리/ })
+    .getByRole("link", { name: /에이전트 지표/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/monday-money-emergency-fund-rate-spread-2026-09-14\/$/,
+    /\/blog\/posts\/weekly-it-trends-2026-09-15\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "월요일 경제 기초: 비상금과 예금금리 사이의 기회비용 읽기",
+    "2026년 9월 셋째 주 IT 기술동향: 에이전트 지표, 로컬 런타임, 배치 스케줄링",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "비상금, 예금금리, 물가상승률, 대출금리, 현금흐름이 하나의 개인 재무 대시보드로 연결된 다이어그램",
+    "에이전트 사용 지표, 코드리뷰 검증, Cloudflare 로컬 런타임, Kubernetes 배치 스케줄링이 운영 점검판에 연결된 이미지",
   );
 });
 
@@ -53,12 +53,12 @@ test("홈은 관심 분야 링크 계약과 현재 학습 단계 표식을 유�
   await expect(backendLink).toHaveAttribute("href", "/blog/categories/Backend/");
 
   const roadmap = page.getByRole("list", { name: "학습 순서" });
-  const currentStep = roadmap.getByRole("listitem").filter({ hasText: "Kotlin" });
+  const currentStep = roadmap.getByRole("listitem").filter({ hasText: "Flutter" });
 
   await expect(currentStep).toHaveAttribute("aria-current", "step");
   await expect(currentStep.getByText("현재 단계")).toBeVisible();
 
-  for (const label of ["Next.js", "React Native", "Flutter"]) {
+  for (const label of ["Next.js", "React Native", "Kotlin"]) {
     await expect(roadmap.getByRole("listitem").filter({ hasText: label })).not.toHaveAttribute(
       "aria-current",
       "step",
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /비상금과 예금금리/,
+      name: /에이전트 지표/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /offline-first 캐시 경계/,
+      name: /테스트 피라미드/,
     }),
   ).toBeVisible();
 });

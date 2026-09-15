@@ -1,0 +1,192 @@
+---
+title: "2026년 9월 셋째 주 IT 기술동향: 에이전트 지표, 로컬 런타임, 배치 스케줄링"
+description: "2026년 9월 8일부터 9월 15일까지 공식 발표된 Copilot 운영지표, 코드리뷰 에이전트 검증, Cloudflare Workers, Kubernetes 1.37 변화를 정리합니다."
+publishedAt: 2026-09-15T09:04:00+09:00
+draft: false
+category: "DevOps"
+tags: ["Tech Trends", "AI Agent", "Cloudflare", "Kubernetes", "Developer Tools"]
+kind: "trend"
+heroImage: "../../assets/blog/weekly-it-trends-2026-09-15/cover.webp"
+heroImageAlt: "에이전트 사용 지표, 코드리뷰 검증, Cloudflare 로컬 런타임, Kubernetes 배치 스케줄링이 운영 점검판에 연결된 이미지"
+imageCredit:
+  label: "직접 생성 이미지"
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 범위**
+>
+> 2026년 9월 15일에 공식 changelog, 공식 릴리스 노트와 공식 문서를 확인했습니다.
+> 범위는 2026년 9월 8일부터 2026년 9월 15일까지 공개된 공식 발표입니다. 기준 상태는
+> GitHub Copilot auto model selection cost/quality tiers, VS Code Agents usage metrics, Copilot code review
+> analysis updates, Cloudflare Miniflare v5, Cloudflare Python Workers Python 3.14 default, Kubernetes v1.37
+> workload-aware scheduling입니다. preview, beta, research preview는 운영 안정 기능처럼 설명하지 않았습니다.
+
+## 결론부터 말하면
+
+이번 주 동향은 **AI 개발도구가 팀 운영지표와 검증 도구를 갖추고, 로컬 개발 런타임과 대규모 batch scheduling이
+더 명시적인 contract로 이동하는 흐름**입니다.
+
+GitHub Copilot은 auto model selection에 cost/quality tier를 추가했고, VS Code Agents 전용 사용 지표를 Copilot
+metrics에 넣기 시작했습니다. Copilot code review는 shell tool 기반 검증과 agent ensemble을 확대했습니다.
+Cloudflare는 Miniflare v5로 `cf` CLI와 `cloudflare.config.ts` 시대를 준비하고, 새 Python Workers의 기본 Python
+runtime을 3.14로 올렸습니다. Kubernetes 1.37은 workload-aware scheduling에서 Workload/PodGroup API와 gang
+scheduling을 Beta로 끌어올렸습니다.
+
+Spring Boot 팀이 볼 지점은 "AI 도구가 하나 더 나왔다"가 아니라, **agent 사용량, 검증 권한, 로컬 실행 환경,
+batch scheduling policy를 운영 표준으로 어떻게 기록할 것인가**입니다.
+
+## 이번 주에 확인한 큰 흐름
+
+| 영역 | 공식 발표 | Spring Boot 팀이 볼 지점 |
+|---|---|---|
+| AI 개발도구 비용 | Copilot auto model selection cost/quality tier | prompt별 model 선택을 비용, 품질, latency 기준으로 설명해야 합니다. |
+| Agent 운영지표 | VS Code Agents metrics GA | editor agent 사용량을 generic Copilot 사용량과 분리해 측정합니다. |
+| AI 코드리뷰 검증 | Copilot code review shell tools, ensemble updates | agent review도 build/test 실행 권한과 sandbox 경계를 문서화해야 합니다. |
+| 로컬 Workers 런타임 | Miniflare v5, Python Workers Python 3.14 default | dev/prod config shape와 runtime version drift를 점검합니다. |
+| 배치 스케줄링 | Kubernetes 1.37 workload-aware scheduling Beta | ML/batch workload를 개별 Pod가 아니라 workload 단위로 봅니다. |
+
+직전 기술동향 글은 CI runner, npm trusted publishing, Cloudflare Python Workers WSGI/ASGI, Cloud Run, Cloud SQL,
+Docker Engine을 다뤘습니다. 이번 글에서는 같은 CI와 package publish 축을 반복하지 않고, agent 운영지표,
+agent review 검증, Workers local runtime, Kubernetes scheduling policy로 초점을 옮겼습니다.
+
+<Mermaid title="2026년 9월 셋째 주 기술 동향 흐름">
+{`flowchart LR
+  Official["공식 발표<br/>2026-09-08 ~ 2026-09-15"] --> AgentOps["Agent 운영지표"]
+  Official --> Review["AI 코드리뷰 검증"]
+  Official --> Runtime["로컬/서버리스 런타임"]
+  Official --> Scheduling["Batch scheduling"]
+
+  AgentOps --> Decision["도입 판단"]
+  Review --> Decision
+  Runtime --> Decision
+  Scheduling --> Decision
+
+  Decision --> Cost["비용"]
+  Decision --> Evidence["검증 증적"]
+  Decision --> Policy["운영 정책"]
+`}
+</Mermaid>
+
+## 1. Copilot auto model selection은 비용과 품질 tier를 드러내기 시작했습니다
+
+GitHub는 2026년 9월 14일 Copilot auto model selection에 세 가지 tier를 추가했다고 발표했습니다. `Efficiency`는
+낮은 비용과 빠른 단순 작업, `Balance`는 일상 작업의 비용/품질/latency 균형, `Intelligence`는 복잡한 작업의 품질을
+우선합니다. 중요한 점은 세 tier가 같은 model pool을 쓰고, prompt마다 auto가 적합한 model을 고른다는 것입니다.
+
+이 변화는 AI coding assistant를 팀에 도입할 때 "좋은 모델을 쓰자"보다 더 실무적입니다. 같은 pull request 설명,
+테스트 보강, 리팩터링 제안이라도 비용과 latency 기대치가 다릅니다. 팀은 다음을 분리해서 적어야 합니다.
+
+- 빠른 반복 작업은 낮은 비용과 짧은 latency를 우선한다.
+- 장애 분석, 보안 review, 복잡한 migration은 품질 우선 tier를 허용한다.
+- auto selection의 사용량 청구는 실제 선택된 model에 따라 달라진다.
+- 사람 review 없이 agent 결과를 배포하지 않는 경계를 둔다.
+
+Spring Boot 팀에서도 Controller 테스트 생성, JPA query review, migration plan 작성처럼 작업 유형별 tier 기본값을
+정해 두면 비용 논쟁이 훨씬 덜 감정적입니다.
+
+## 2. VS Code Agents 사용량이 Copilot metrics에 별도로 잡힙니다
+
+GitHub는 2026년 9월 11일 Copilot usage metrics reports에 VS Code Agents window 활동 지표를 추가했다고 공지했습니다.
+enterprise와 organization aggregate report에는 daily active VS Code agent users, session count, user messages가
+들어가고, user-level report에는 해당 window 사용 여부와 per-user session/message 값이 추가됩니다.
+
+이 발표의 핵심은 agent adoption을 "Copilot을 켰는가"에서 분리할 수 있다는 점입니다. editor completion을 쓰는 팀과
+agent window에서 긴 작업을 맡기는 팀은 운영 방식이 다릅니다.
+
+| 측정 항목 | 해석 |
+|---|---|
+| daily active VS Code agent users | agent workflow를 실제로 쓰는 인원 |
+| session count | 긴 작업을 얼마나 자주 맡기는지 |
+| total user messages | agent와 사람 사이의 steering 빈도 |
+| user-level usage | 특정 팀의 adoption과 교육 필요 지점 |
+
+지표가 생기면 좋은 점도 있지만, 오해도 생깁니다. message 수가 많다고 생산성이 높은 것은 아닙니다. 실패한 agent를
+계속 달래는 상황일 수도 있습니다. usage metrics는 pull request lead time, review 재작업, CI 실패 감소 같은 결과
+지표와 함께 봐야 합니다.
+
+## 3. Copilot code review는 shell tool 검증과 agent ensemble로 이동합니다
+
+같은 날 GitHub는 Copilot code review가 처리된 comment를 자동 resolve하고, autofix suggestion에 smart commit
+message를 제안하며, 분석 단계에서 더 넓은 shell tool set을 쓴다고 발표했습니다. Lite effort level에서도 여러
+agent가 review를 만들고 Copilot이 findings를 합치는 ensemble 방식이 적용됩니다.
+
+여기서 눈여겨볼 부분은 UI 편의보다 검증 방식입니다. AI review가 파일 읽기만 하는 수준을 넘어 build command,
+test command, targeted script, tool/API 조회를 수행한다면 팀은 권한과 격리 기준을 다시 봐야 합니다.
+
+- review agent가 어떤 command를 실행할 수 있는가
+- secret, production credential, private network에 접근하지 않는가
+- test 실패와 lint 실패를 comment severity에 어떻게 반영하는가
+- 자동 resolve된 comment가 사람의 의도를 정말 충족했는가
+
+agent review가 강해질수록 "AI가 봤다"가 아니라 "어떤 증거를 수집했는가"가 중요해집니다. 기존 code review checklist에
+agent가 실행한 command와 실패한 command를 남기는 칸을 추가하는 편이 좋습니다.
+
+## 4. Cloudflare는 Workers 로컬 개발과 Python runtime 기준을 바꿨습니다
+
+Cloudflare는 2026년 9월 8일 Miniflare v5가 upcoming `cf` CLI를 준비한다고 공지했습니다. `wrangler dev`,
+Cloudflare Vite plugin, `@cloudflare/vitest-plugin` 뒤에서 Miniflare를 쓰는 대부분의 프로젝트는 직접 조치가 필요
+없지만, 직접 Miniflare API를 쓰는 도구는 설정 shape가 `cloudflare.config.ts`에 맞게 바뀌는 흐름을 봐야 합니다.
+
+같은 날 Cloudflare는 새 Python Workers가 compatibility date `2026-09-08` 이상일 때 Python 3.14를 기본으로 쓴다고
+공지했습니다. 내부적으로 Pyodide runtime도 314.0.6으로 올라갑니다.
+
+Spring Boot 팀이 Workers를 주변 도구로 쓰는 경우는 꽤 많습니다. webhook adapter, lightweight edge auth, short-lived
+API proxy, 운영 dashboard helper가 여기에 들어갑니다. 이런 도구는 본 서비스보다 작아서 version drift가 방치되기
+쉽습니다. 이제 다음을 확인해야 합니다.
+
+- Miniflare를 직접 import하는 script가 있는가
+- local dev config와 deploy config가 같은 source of truth를 보는가
+- Python Worker dependency가 Python 3.14/Pyodide runtime에서 동작하는가
+- compatibility date 변경이 기존 Worker에 바로 적용되는지, 새 Worker에만 적용되는지 구분했는가
+
+## 5. Kubernetes 1.37은 batch와 AI/ML workload를 Pod 묶음으로 봅니다
+
+Kubernetes는 2026년 9월 8일 v1.37 workload-aware scheduling 변화를 소개했습니다. 이번 release에서 Workload와
+PodGroup API, gang scheduling, workload-aware preemption, shared DRA ResourceClaims for PodGroups가 Beta로
+진행됐습니다. CompositePodGroup API는 복잡한 계층형 workload를 표현하기 위한 새 Alpha 기능입니다.
+
+Spring Boot API 서버만 운영한다면 이 기능이 멀어 보일 수 있습니다. 하지만 추천 batch, ML training, 대규모 report
+job, data migration, nightly verification job은 점점 Kubernetes 위에서 함께 움직입니다. 이때 개별 Pod가 뜨는지보다
+"필요한 Pod 묶음이 같이 배치될 수 있는가"가 중요합니다.
+
+| Kubernetes 1.37 항목 | 상태 | 운영 판단 |
+|---|---|---|
+| Workload/PodGroup API | Beta | batch controller와 scheduler policy 검토 후보 |
+| gang scheduling | Beta | all-or-nothing batch 실행에 적합 |
+| workload-aware preemption | Beta 흐름에 통합 | 낮은 priority workload 축출 기준을 명확히 해야 함 |
+| CompositePodGroup API | Alpha | 복잡한 ML/JobSet 구조의 실험 후보 |
+
+운영팀은 feature gate, API version, controller 지원 여부를 먼저 봐야 합니다. 특히 Beta라고 해도 기본 활성화 여부와
+managed Kubernetes 제공 시점은 배포 환경마다 다를 수 있습니다.
+
+## 본문에 넣지 않은 후보와 제외 이유
+
+- Cloudflare WAF의 Adobe Commerce/Magento 긴급 rule과 Next.js RCE rule consolidation은 중요하지만, 특정 취약점
+  대응 성격이 강해 별도 보안 점검 글이 더 적합합니다.
+- GitHub Copilot Jira integration과 Project HydraFusion preview는 화제성이 있지만, 수요일 AI agent 편성에서 agent
+  workflow와 model routing으로 비교하는 편이 자연스럽습니다.
+- Cloudflare CASB Zoom integration은 SaaS 보안 운영에는 의미가 있지만, 이번 글의 개발자 workflow와 runtime 축에서
+  벗어나 제외했습니다.
+- Cloudflare Radar search의 Internet events 지원은 관측성 후보였지만, 운영 도구 변화보다 이번 주에는 agent metrics와
+  Kubernetes scheduling의 실무 영향이 더 큽니다.
+
+## 실무 체크리스트
+
+- [ ] AI coding assistant 사용 기준을 fast task, everyday task, complex task로 나눠 비용 tier를 정한다.
+- [ ] Copilot/agent 사용량은 completion과 agent window를 분리해 본다.
+- [ ] AI code review가 실행한 command, 실패한 command, 접근 가능한 secret 범위를 review 증적으로 남긴다.
+- [ ] 직접 Miniflare API를 쓰는 내부 도구가 있으면 v5 changelog와 `cloudflare.config.ts` 전환 여부를 확인한다.
+- [ ] 새 Python Workers의 compatibility date와 Python 3.14 dependency 호환성을 점검한다.
+- [ ] Kubernetes batch/ML workload가 있다면 Pod 단위 scheduling 한계를 Workload/PodGroup 관점으로 다시 본다.
+- [ ] Beta/Alpha scheduling feature는 managed cluster 제공 여부와 feature gate를 분리해 기록한다.
+
+## 참고자료
+
+- [Configure cost and quality in Copilot auto model selection](https://github.blog/changelog/2026-09-14-configure-cost-and-quality-in-copilot-auto-model-selection/)
+- [Add VS Code Agents to Copilot usage metrics](https://github.blog/changelog/2026-09-11-add-vs-code-agents-to-copilot-usage-metrics/)
+- [Auto-resolution and analysis updates in Copilot code review](https://github.blog/changelog/2026-09-11-auto-resolution-and-analysis-updates-in-copilot-code-review/)
+- [GitHub Copilot weekly releases - September 7](https://github.blog/changelog/2026-09-10-github-copilot-weekly-releases-september-7/)
+- [Miniflare v5 prepares local development for the cf CLI](https://developers.cloudflare.com/changelog/post/2026-09-08-miniflare-v5/)
+- [Python 3.14 for Python Workers](https://developers.cloudflare.com/changelog/post/2026-09-08-python-314-for-python-workers/)
+- [Kubernetes v1.37: Advancing Workload-Aware Scheduling](https://kubernetes.io/blog/2026/09/08/kubernetes-v1-37-advancing-workload-aware-scheduling/)
