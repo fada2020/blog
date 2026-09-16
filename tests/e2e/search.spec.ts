@@ -9,15 +9,15 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(69);
+  expect(entries).toHaveLength(71);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "2026년 9월 셋째 주 IT 기술동향: 에이전트 지표, 로컬 런타임, 배치 스케줄링",
+    "AI agent 실전 운영: 오래 달리는 작업은 상태와 승인을 어떻게 남기는가",
   );
   expect(entries[0].href).toBe(
-    "/blog/posts/weekly-it-trends-2026-09-15/",
+    "/blog/posts/ai-agent-long-running-state-approval-2026-09-16/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });

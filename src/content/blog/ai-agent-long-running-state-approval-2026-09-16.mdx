@@ -1,0 +1,204 @@
+---
+title: "AI agent 실전 운영: 오래 달리는 작업은 상태와 승인을 어떻게 남기는가"
+description: "Codex, Claude Code, GitHub Copilot, Gemini, Grok 계열을 장기 실행 작업, 메모리, 승인, 평가 증적 관점에서 비교하고 Spring Boot 팀의 최소 운영 규칙을 정리합니다."
+publishedAt: 2026-09-16T09:00:00+09:00
+draft: false
+category: "Tooling"
+tags: ["AI Agent", "Codex", "Claude Code", "GitHub Copilot", "Gemini", "Grok"]
+kind: "trend"
+heroImage: "../../assets/blog/ai-agent-long-running-state-approval-2026-09-16/cover.webp"
+heroImageAlt: "장기 실행 AI agent 작업이 상태, 메모리, 승인, 평가, 감사 로그 단계로 이어지는 무텍스트 운영 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 범위**
+>
+> 2026년 9월 16일에 OpenAI Agents API와 agent eval 문서, Agent Skills 문서, Anthropic Claude Code
+> subagents와 memory 문서, GitHub Copilot custom agents와 third-party coding agents 문서, Google
+> Gemini Code Assist agent mode와 Gemini Enterprise Agent Platform 문서, xAI Grok 4.6 API 문서를
+> 확인했습니다. preview, public preview, beta, early access 기능은 안정 운영 기능처럼 단정하지 않았습니다.
+
+## 결론부터 말하면
+
+AI agent 선택은 이제 "어느 모델이 코딩을 제일 잘하나"만의 문제가 아닙니다. 실제 팀에서 차이를 만드는 것은
+오래 달리는 작업이 **어디에 상태를 저장하는지, 어떤 메모리를 읽는지, 언제 사람에게 승인을 묻는지, 실패를
+어떻게 평가하는지**입니다.
+
+지난 글에서 agent router와 평가표를 잡았다면, 이번에는 장기 실행 작업을 운영하는 기준을 잡아야 합니다.
+Spring Boot 팀이 바로 적용할 결론은 단순합니다.
+
+> agent에게 일을 맡길 때는 prompt보다 먼저 **state, memory, approval, audit** 위치를 정한다.
+
+작은 refactor는 IDE agent로 충분할 수 있습니다. 하지만 migration, 다중 PR, 장애 분석, 문서화와 코드 수정을
+묶은 작업은 중간 상태가 남아야 합니다. agent가 똑똑해도 상태가 사라지면 재시도 비용은 사람에게 돌아옵니다.
+
+## 이번 주 비교 축
+
+| 축 | 최근 확인한 흐름 | Spring Boot 팀에서 볼 질문 |
+|---|---|---|
+| OpenAI Agents API | long-running task와 saved session, managed Codex harness, sandbox 선택지를 구분 | 우리 서비스 agent는 OpenAI-managed state와 자체 DB state 중 어디에 남길 것인가 |
+| OpenAI evals/skills | trace, grader, dataset, reusable instruction bundle을 agent workflow에 붙임 | prompt 변경을 느낌이 아니라 회귀 테스트로 볼 수 있는가 |
+| Claude Code | subagent, auto memory, CLAUDE.md, hooks로 context와 정책을 분리 | 반복 작업을 main conversation에 모두 쌓지 않고 분리할 수 있는가 |
+| GitHub Copilot | custom agents와 third-party coding agents가 PR 중심 비동기 작업을 만듦 | issue, PR, review comment가 작업 상태 저장소가 될 수 있는가 |
+| Gemini | Code Assist agent mode는 plan 승인과 tool permission을 강조하고, Agent Platform은 govern/evaluate를 전면에 둠 | IDE 작업과 enterprise governance를 어디서 나눌 것인가 |
+| Grok 4.6 | API 문서 기준 500k context, tool calling, code execution, Responses API 흐름을 제시 | 모델 능력은 후보지만 운영 harness는 별도로 설계해야 하는가 |
+
+순위표를 만들기보다, 어떤 종류의 상태가 어디에 남는지 보겠습니다.
+
+## 오래 달리는 agent는 세 가지 상태를 남깁니다
+
+agent 작업의 상태는 하나가 아닙니다.
+
+| 상태 | 예시 | 사라지면 생기는 문제 |
+|---|---|---|
+| 대화 상태 | 이전 지시, 중간 판단, tool 결과 | 같은 설명을 반복하고 판단 근거가 흐려짐 |
+| 작업 상태 | branch, diff, test output, PR comment | 무엇을 바꿨는지 review하기 어려움 |
+| 운영 상태 | 승인, 비용, sandbox, audit log | 누가 어떤 권한을 허용했는지 추적 불가 |
+
+OpenAI Agents API 문서는 Agents API를 long-running task에서 OpenAI가 agent를 관리하고 진행 상태를 저장하는
+선택지로 설명합니다. 반대로 Agents SDK나 Responses API는 애플리케이션이 더 많은 runtime과 저장소 책임을
+집니다. 이 구분은 중요합니다. 제품 안에 agent를 넣는다면 "우리 DB에 state를 저장할 것인가, 플랫폼 session에
+맡길 것인가"를 먼저 정해야 합니다.
+
+GitHub Copilot의 coding agent 흐름은 다른 답을 줍니다. issue, branch, pull request, review comment 자체가
+상태 저장소가 됩니다. 작업이 끝나면 PR을 만들고 사람이 comment로 iteration을 요청합니다. code review 중심
+팀에는 이 방식이 자연스럽습니다.
+
+## Memory는 편의 기능이 아니라 책임 경계입니다
+
+Claude Code memory 문서는 CLAUDE.md와 auto memory를 구분합니다. CLAUDE.md는 사람이 쓰는 지속 지시이고,
+auto memory는 Claude가 correction과 preference를 학습해 저장하는 notes입니다. 둘 다 context로 들어오지만
+강제 정책은 아닙니다. 막아야 하는 행동은 hook 같은 별도 장치가 필요합니다.
+
+OpenAI Agent Skills도 비슷한 문제를 다른 형태로 풉니다. skill은 `SKILL.md`와 supporting files로 반복 가능한
+절차와 규칙을 묶습니다. 팀의 PR review 방식, release checklist, 장애 보고 양식처럼 매번 prompt에 붙이면
+길어지는 내용을 재사용 가능한 단위로 만들 수 있습니다.
+
+Spring Boot 팀에서는 memory를 이렇게 나누는 편이 안전합니다.
+
+| 넣을 위치 | 넣어도 되는 것 | 넣으면 위험한 것 |
+|---|---|---|
+| repository instruction | build/test 명령, package 규칙, public API 보존 규칙 | secret, 개인 계정, 운영 endpoint |
+| skill/rule | PR review checklist, migration 절차, release note 형식 | 모든 작업에 무조건 적용할 긴 배경 설명 |
+| agent auto memory | 반복 correction, 팀 선호, 자주 놓친 convention | 검증되지 않은 추측, 일회성 장애 상황 |
+| issue/PR | task 목표, acceptance criteria, review 결과 | private data, 고객 식별 정보 |
+
+메모리가 많아질수록 agent가 좋아질 것 같지만, 실제로는 오래되고 충돌하는 규칙이 더 위험합니다. memory에는
+짧고 검증 가능한 규칙만 남기고, 절차는 skill이나 문서로 옮기는 편이 낫습니다.
+
+## Approval은 agent마다 다른 UI를 같은 정책으로 맞추는 일입니다
+
+Gemini Code Assist agent mode 문서는 file system 변경이나 mutating operation에는 명시 permission을 묻고,
+복잡한 작업은 high-level plan을 승인한 뒤 진행한다고 설명합니다. Claude Code는 hooks와 permissions,
+subagent별 tool access를 제공합니다. GitHub Copilot coding agent는 PR과 review comment를 자연스러운 승인
+흐름으로 씁니다.
+
+도구마다 UI는 다르지만 팀 정책은 같아야 합니다.
+
+<Mermaid title="장기 실행 agent의 운영 상태 흐름">
+{`flowchart TD
+  Request["작업 요청"] --> Scope["범위와 금지 변경 기록"]
+  Scope --> Agent["Agent 실행"]
+  Agent --> State["상태 저장<br/>session, branch, PR"]
+  Agent --> Memory["규칙 읽기<br/>instructions, skills"]
+  Agent --> Tool["도구 호출"]
+  Tool --> Approval{"변경/비용/권한?"}
+  Approval -->|낮은 위험| Continue["계속 실행"]
+  Approval -->|높은 위험| Human["사람 승인"]
+  Continue --> Eval["trace, test, review"]
+  Human --> Eval
+  Eval --> Ship["merge 또는 rollback"]
+`}
+</Mermaid>
+
+Spring Boot 저장소라면 아래처럼 시작할 수 있습니다.
+
+| 작업 | 기본 승인 정책 |
+|---|---|
+| `rg`, 파일 읽기, `git diff`, unit test | agent 자율 |
+| formatting, local build, dev server | 저장소 지침에 따라 허용 |
+| dependency 추가, migration 파일 생성, e2e | 계획 제시 후 승인 |
+| DB migration 적용, Terraform apply, production deploy | 사람 실행 |
+| secret 조회, 실제 사용자 데이터 export, 결제/계정 변경 | agent 금지 |
+
+핵심은 "승인받아야 한다"가 아니라 "무엇을 승인해야 하는지 agent가 매번 같은 언어로 이해한다"입니다.
+
+## 평가는 final answer가 아니라 trace에서 시작합니다
+
+OpenAI agent eval 문서는 trace가 model call, tool call, guardrail, handoff를 포함한 end-to-end 기록이고,
+grader로 workflow 단위 문제를 찾을 수 있다고 설명합니다. agent가 만든 최종 답만 보면 실패 원인이 숨습니다.
+잘못된 tool을 골랐는지, handoff가 빠졌는지, 승인 정책을 어겼는지, prompt 변경이 실제로 좋아졌는지 보려면
+중간 경로를 봐야 합니다.
+
+Google Gemini Enterprise Agent Platform도 agent evaluation, multi-turn simulation, live traffic online
+evaluation 같은 축을 전면에 둡니다. 이는 enterprise 기능 소개이기도 하지만, 작은 팀에도 주는 메시지가 있습니다.
+agent 품질은 대화 감상이 아니라 반복 가능한 scenario와 결과로 봐야 합니다.
+
+작게 시작하려면 세 가지 trace만 남기면 됩니다.
+
+1. agent가 읽은 핵심 파일과 출처.
+2. agent가 실행한 test/build 명령과 결과.
+3. agent가 멈춰서 사람에게 물은 승인 지점.
+
+이 세 가지가 없으면 agent가 성공했다고 해도 다음 작업에 학습이 남지 않습니다.
+
+## 이번 주 후보와 제외 이유
+
+- GitHub third-party coding agents는 public preview로 표시되어 있어 안정 운영 기능으로 단정하지 않았습니다. 다만
+  PR 중심 비동기 상태 저장 방식은 본문 비교에 포함했습니다.
+- Gemini Code Assist agent mode는 Pre-GA/preview로 표시되어 있어 production 기본값으로 권하지 않았습니다. 대신
+  plan 승인과 tool permission 모델을 비교 포인트로만 사용했습니다.
+- xAI Grok 4.6은 공식 문서 기준 coding, agentic tool calling, code execution, 500k context를 제시하지만,
+  팀 작업 상태와 승인 흐름을 직접 제공하는 coding workspace라기보다 API/model 후보로 다뤘습니다.
+- 단일 벤치마크 순위표와 소셜 미디어 캡처는 이번 글의 근거로 쓰지 않았습니다. 이번 주 주제는 모델 점수보다
+  장기 실행 상태와 운영 증적입니다.
+
+## Spring Boot 팀의 최소 운영 규칙
+
+처음부터 agent platform을 크게 만들 필요는 없습니다. 다음 파일 세 개만 있어도 충분히 좋아집니다.
+
+```text
+AGENTS.md
+.github/copilot-instructions.md
+docs/agent-eval-checklist.md
+```
+
+`AGENTS.md`에는 build/test 명령, 금지 변경, 승인 기준을 둡니다. Copilot을 쓴다면 repository custom
+instructions를 같은 내용으로 맞춥니다. `agent-eval-checklist.md`에는 반복 작업 5개와 pass/fail 기준을 둡니다.
+
+예를 들어 checkout validation 작업을 맡긴다면 acceptance criteria는 이렇게 씁니다.
+
+```text
+목표: 쿠폰 만료일 검증을 추가한다.
+금지: public API response shape 변경, DB migration, unrelated formatting.
+검증: ./gradlew test, 실패 시 원인 요약.
+승인 필요: dependency 추가, production 설정 변경.
+증적: diff 요약, 테스트 결과, 남은 리스크.
+```
+
+이 정도만 있어도 agent는 "잘 고쳐 줘"보다 훨씬 안정적으로 움직입니다. 사람도 review할 때 무엇을 봐야 하는지
+빨리 압니다.
+
+## 다음에 확인할 것
+
+1. 우리 팀 agent 작업을 `local`, `PR`, `research`, `review` 네 가지로 분류합니다.
+2. 각 작업이 상태를 어디에 남기는지 적습니다. session, branch, PR, issue, trace, 내부 DB 중 하나여야 합니다.
+3. memory에 넣을 규칙과 skill로 뺄 절차를 나눕니다.
+4. preview 기능은 실험 lane에만 두고, production lane에는 안정 기능만 둡니다.
+5. agent별 비용은 token price가 아니라 재시도, 대기 시간, human correction까지 포함해 봅니다.
+
+## 참고자료
+
+- [OpenAI Agents API](https://developers.openai.com/api/docs/guides/agents)
+- [OpenAI agent evals](https://developers.openai.com/api/docs/guides/agent-evals)
+- [OpenAI Agent Skills](https://developers.openai.com/api/docs/guides/tools-skills)
+- [Claude Code subagents](https://docs.anthropic.com/en/docs/claude-code/sub-agents)
+- [Claude Code memory](https://docs.anthropic.com/en/docs/claude-code/memory)
+- [GitHub Copilot custom agents](https://docs.github.com/en/copilot/tutorials/customization-library/custom-agents/your-first-custom-agent)
+- [GitHub third-party coding agents](https://docs.github.com/en/copilot/concepts/agents/about-third-party-coding-agents)
+- [Gemini Code Assist agent mode](https://docs.cloud.google.com/gemini/docs/codeassist/agent-mode)
+- [Gemini Enterprise Agent Platform](https://docs.cloud.google.com/gemini-enterprise-agent-platform/overview)
+- [xAI Grok API documentation](https://docs.x.ai/overview)

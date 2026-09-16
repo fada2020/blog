@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /에이전트 지표/ })
+    .getByRole("link", { name: /오래 달리는 작업/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/weekly-it-trends-2026-09-15\/$/,
+    /\/blog\/posts\/ai-agent-long-running-state-approval-2026-09-16\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "2026년 9월 셋째 주 IT 기술동향: 에이전트 지표, 로컬 런타임, 배치 스케줄링",
+    "AI agent 실전 운영: 오래 달리는 작업은 상태와 승인을 어떻게 남기는가",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "에이전트 사용 지표, 코드리뷰 검증, Cloudflare 로컬 런타임, Kubernetes 배치 스케줄링이 운영 점검판에 연결된 이미지",
+    "장기 실행 AI agent 작업이 상태, 메모리, 승인, 평가, 감사 로그 단계로 이어지는 무텍스트 운영 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /에이전트 지표/,
+      name: /오래 달리는 작업/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /테스트 피라미드/,
+      name: /DI 경계/,
     }),
   ).toBeVisible();
 });

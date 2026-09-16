@@ -1,0 +1,302 @@
+---
+title: "Spring Boot 개발자를 위한 Flutter 열셋째 걸음: feature-first 구조와 DI 경계 나누기"
+description: "Spring Boot의 package, configuration, bean wiring 감각과 비교하며 Flutter 앱에서 feature-first 구조, MVVM, Provider 기반 의존성 주입을 나누는 방법을 정리합니다."
+publishedAt: 2026-09-16T08:55:00+09:00
+draft: false
+category: "Frontend"
+tags: ["Flutter", "Dart", "Spring Boot", "Architecture", "Provider"]
+kind: "learning"
+heroImage: "../../assets/blog/flutter-feature-first-di-boundary-2026-09-16/cover.webp"
+heroImageAlt: "Flutter feature-first 폴더, view model, repository, service, provider composition root가 연결된 무텍스트 기술 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 모바일 앱 학습"
+lesson: 13
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 9월 16일에 Flutter SDK archive JSON, Flutter app architecture guide, architecture
+> recommendations, dependency injection case study, `provider` 패키지 정보를 확인했습니다. Flutter 공식
+> 문서 본문은 3.47.2 기준으로 표시되어 있지만 SDK archive JSON의 stable channel은 Flutter 3.47.4,
+> Dart 3.13.3을 가리켰습니다. 이 글은 stable channel과 공식 architecture 권장 구조를 기준으로 하며,
+> beta/dev/main channel 기능을 안정 기능처럼 다루지 않았습니다.
+
+## 결론부터 말하면
+
+Flutter 앱이 커질 때 먼저 망가지는 곳은 widget 문법이 아닙니다. `lib/` 아래에 screen, repository,
+service, model이 기능과 무관하게 흩어지고, 화면에서 API client를 직접 만들기 시작할 때 유지보수가
+어려워집니다.
+
+Spring Boot 개발자라면 이 냄새를 이미 압니다. Controller에서 `new RestTemplate()`을 만들고, service가
+다른 service의 내부 구현을 직접 알고, configuration class 없이 환경별 구현이 뒤섞이는 상황과 비슷합니다.
+
+Flutter에서도 답은 거창하지 않습니다. **기능 단위로 코드를 모으고, view는 view model만 알고, repository와
+service는 top-level composition root에서 주입**하면 됩니다.
+
+## 이번 주 개념
+
+Flutter 공식 architecture guide는 앱을 UI layer와 data layer로 나누고, UI layer에는 view와 view model,
+data layer에는 repository와 service를 둡니다. 복잡한 도메인 규칙이 있으면 그 사이에 domain layer를
+추가할 수 있지만, 처음부터 모든 앱에 use-case class를 깔 필요는 없습니다.
+
+핵심 객체는 네 가지입니다.
+
+| Flutter 구조 | 역할 | Spring Boot에 비유하면 |
+|---|---|---|
+| View | widget 조합과 사용자 event 전달 | Controller의 request mapping보다 template/view에 가까움 |
+| ViewModel | 화면 상태와 command | Controller + application service 사이의 presentation logic |
+| Repository | 앱 데이터의 source of truth | domain-facing port 또는 repository/service facade |
+| Service | HTTP, file, plugin 같은 외부 API wrapper | infrastructure adapter |
+
+공식 recommendations는 dependency injection을 strongly recommend로 두고, `provider` 패키지를 권장합니다.
+DI의 목적은 멋진 container를 쓰는 것이 아니라 전역 객체를 줄이고 테스트 가능한 경계를 만드는 것입니다.
+
+<Mermaid title="Flutter feature-first 구조와 DI 경계">
+{`flowchart TD
+  App["main.dart<br/>composition root"] --> Providers["MultiProvider"]
+  Providers --> Service["ArticleApiService"]
+  Providers --> Repository["ArticleRepository"]
+  Providers --> ViewModel["ArticleListViewModel"]
+  ViewModel --> View["ArticleListView"]
+  Repository --> Service
+  View --> ViewModel
+
+  Feature["features/article"] --> View
+  Feature --> ViewModel
+  Feature --> Repository
+  Core["core/network, core/storage"] --> Service
+`}
+</Mermaid>
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Spring Boot에서는 기능이 작을 때도 보통 다음 경계를 기대합니다.
+
+```java
+@RestController
+class ArticleController {
+    private final ArticleService articleService;
+
+    ArticleController(ArticleService articleService) {
+        this.articleService = articleService;
+    }
+
+    @GetMapping("/articles/{id}")
+    ArticleResponse find(@PathVariable String id) {
+        return ArticleResponse.from(articleService.find(id));
+    }
+}
+```
+
+Controller는 `ArticleRepository` 구현체를 직접 만들지 않습니다. HTTP client도 직접 만들지 않습니다.
+객체 생성과 wiring은 configuration, component scan, profile, test slice가 맡습니다. 그래서 test에서는 fake나
+mock을 넣고, production에서는 실제 구현을 넣을 수 있습니다.
+
+Flutter에도 같은 감각을 가져가면 됩니다. 화면 안에서 `ArticleApiService()`를 직접 만들면, 그 화면은 이제 API
+주소, cache, retry, test double까지 모두 알아야 합니다. 작은 예제에서는 편해 보이지만 기능이 늘면 화면이
+composition root가 되어 버립니다.
+
+## Flutter에서는 무엇이 다른가
+
+Spring Boot의 IoC container처럼 framework가 모든 객체를 자동으로 찾아 bean으로 등록해 주지는 않습니다.
+Flutter 앱에서는 보통 `main.dart`, `app.dart`, `dependencies.dart` 같은 top-level 조립 지점에서 의존성을
+만듭니다.
+
+공식 dependency injection case study는 service를 repository 생성자에 넘기고, repository를 view model에 넘기는
+방식을 보여 줍니다. Compass 예제에서는 `package:provider`로 service와 repository를 widget tree 상단에 노출합니다.
+
+여기서 중요한 질문은 "provider냐 get_it이냐"가 아닙니다. 먼저 정해야 할 것은 **어디에서 만들고, 어디까지
+보이게 할 것인가**입니다.
+
+## 대응 개념 비교
+
+| Spring Boot 감각 | Flutter에서의 대응 | 주의할 점 |
+|---|---|---|
+| `@Configuration` | `dependencies.dart`, `MultiProvider` | 화면 아래쪽에서 객체를 만들지 않습니다. |
+| constructor injection | 생성자 인자로 service/repository 전달 | 전역 singleton을 기본값으로 두지 않습니다. |
+| package by feature | `features/article/...` | layer만으로 폴더를 나누면 기능 흐름이 흩어집니다. |
+| profile별 bean | dev/prod repository 구현 교체 | 앱 시작 지점에서 선택하고 화면은 모르게 합니다. |
+| slice test | view model unit test, view widget test | DI가 있어야 fake를 쉽게 꽂을 수 있습니다. |
+
+Spring에서는 `@Autowired`가 안 보이게 해 주던 wiring을 Flutter에서는 명시적으로 볼 수 있습니다. 이것은 단점이
+아니라 장점입니다. 앱이 어떤 service, repository, view model로 조립되는지 코드 한 곳에서 확인할 수 있습니다.
+
+## 최소 실행 예제: feature 폴더를 먼저 잡습니다
+
+작은 article 목록 기능을 만든다고 해 보겠습니다.
+
+```text
+lib/
+  app.dart
+  dependencies.dart
+  core/
+    network/
+      api_client.dart
+  features/
+    article/
+      data/
+        article_api_service.dart
+        article_repository.dart
+      ui/
+        article_list_view.dart
+        article_list_view_model.dart
+      model/
+        article.dart
+```
+
+layer별 폴더만 쓰면 `views/`, `view_models/`, `repositories/`, `services/`가 금방 커집니다. Spring Boot에서도
+모든 controller를 한 폴더에, 모든 service를 한 폴더에 몰아넣으면 도메인 흐름을 읽기 어려운 것과 같습니다.
+
+feature-first는 "한 기능을 지울 때 어디를 봐야 하는가"를 쉽게 만듭니다. 공통 network client나 design system은
+`core/`에 둘 수 있지만, article 기능의 repository와 view model은 article 기능 안에 둡니다.
+
+## Service와 Repository는 생성자로 연결합니다
+
+외부 API를 감싸는 service는 stateless에 가깝게 둡니다.
+
+```dart
+class ArticleApiService {
+  ArticleApiService(this._client);
+
+  final ApiClient _client;
+
+  Future<List<ArticleDto>> fetchLatest() {
+    return _client.getJsonList('/articles', ArticleDto.fromJson);
+  }
+}
+```
+
+repository는 service의 raw response를 화면이 쓸 domain model로 바꾸고, cache나 retry 같은 데이터 정책을 맡습니다.
+
+```dart
+class ArticleRepository {
+  ArticleRepository({required ArticleApiService apiService})
+      : _apiService = apiService;
+
+  final ArticleApiService _apiService;
+
+  Future<List<Article>> latest() async {
+    final dtos = await _apiService.fetchLatest();
+    return dtos.map((dto) => dto.toDomain()).toList(growable: false);
+  }
+}
+```
+
+이 경계는 test를 단순하게 만듭니다. repository test에서는 fake service를 넣고, view model test에서는 fake
+repository를 넣습니다. 화면은 network가 있는지조차 모릅니다.
+
+## ViewModel은 화면 상태와 command만 노출합니다
+
+view model은 repository에서 데이터를 가져와 화면 상태로 바꿉니다.
+
+```dart
+sealed class ArticleListState {
+  const ArticleListState();
+}
+
+class ArticleListLoading extends ArticleListState {
+  const ArticleListLoading();
+}
+
+class ArticleListLoaded extends ArticleListState {
+  const ArticleListLoaded(this.articles);
+  final List<Article> articles;
+}
+
+class ArticleListViewModel extends ChangeNotifier {
+  ArticleListViewModel({required ArticleRepository repository})
+      : _repository = repository;
+
+  final ArticleRepository _repository;
+
+  ArticleListState state = const ArticleListLoading();
+
+  Future<void> load() async {
+    state = ArticleListLoaded(await _repository.latest());
+    notifyListeners();
+  }
+}
+```
+
+view는 이 상태를 읽고 그립니다.
+
+```dart
+class ArticleListView extends StatelessWidget {
+  const ArticleListView({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final viewModel = context.watch<ArticleListViewModel>();
+
+    return switch (viewModel.state) {
+      ArticleListLoading() => const Center(child: CircularProgressIndicator()),
+      ArticleListLoaded(:final articles) => ListView(
+          children: [
+            for (final article in articles) Text(article.title),
+          ],
+        ),
+    };
+  }
+}
+```
+
+Spring MVC Controller가 database row를 그대로 JSON으로 내보내지 않듯, Flutter view도 API DTO를 그대로
+붙잡지 않는 편이 좋습니다.
+
+## Composition root는 작고 명시적으로 둡니다
+
+공식 DI case study처럼 앱 상단에서 객체를 조립합니다.
+
+```dart
+Widget buildApp() {
+  return MultiProvider(
+    providers: [
+      Provider(create: (_) => ApiClient(baseUrl: 'https://api.example.com')),
+      Provider(create: (context) => ArticleApiService(context.read())),
+      Provider(create: (context) => ArticleRepository(apiService: context.read())),
+      ChangeNotifierProvider(
+        create: (context) =>
+            ArticleListViewModel(repository: context.read())..load(),
+      ),
+    ],
+    child: const App(),
+  );
+}
+```
+
+여기서는 어떤 concrete class를 쓸지 보여도 괜찮습니다. 오히려 그래야 합니다. 대신 view 아래쪽으로 갈수록
+구현 세부사항이 보이면 안 됩니다. production API, local fake, staging endpoint 선택은 composition root나
+환경별 bootstrap에서 끝내고, 화면은 동일한 repository contract만 보게 합니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫째, Flutter에는 Spring container가 없으니 그냥 전역 singleton을 쓰면 된다고 생각하기 쉽습니다. 하지만 전역
+singleton은 테스트 격리와 화면별 lifecycle을 어렵게 만듭니다. 필요한 범위에 주입하세요.
+
+둘째, feature-first를 "폴더를 많이 만드는 규칙"으로 오해할 수 있습니다. 목적은 폴더 수가 아니라 기능 흐름을
+가까이 두는 것입니다. 한두 화면짜리 앱에서 과한 domain layer를 만들 필요는 없습니다.
+
+셋째, provider를 state management 선택지로만 봅니다. 공식 문서는 DI 구현에도 provider를 권장합니다. 상태 관리
+도구를 무엇으로 쓰든 객체 생성 경계는 별도로 설계해야 합니다.
+
+넷째, view model을 service처럼 계속 키웁니다. 화면에서만 필요한 formatting과 command는 view model이 맡아도
+되지만, 재사용되는 business rule은 repository나 domain layer로 내려야 합니다.
+
+## 연습 문제
+
+1. 지금 가진 Flutter 예제에서 화면 안의 `new` 또는 생성자 호출을 찾아 composition root로 옮겨 보세요.
+2. `features/profile` 폴더를 만들고 `ui`, `data`, `model` 세 하위 폴더만으로 시작해 보세요.
+3. repository 구현을 `RemoteArticleRepository`와 `FakeArticleRepository`로 나누고 view model test에서 fake를 넣어 보세요.
+4. `ArticleListView`가 API DTO를 직접 import하지 않는지 확인해 보세요.
+5. 다음 글을 준비하며 route별로 view model lifecycle이 언제 만들어지고 사라져야 하는지 적어 보세요.
+
+## 참고자료
+
+- [Flutter SDK archive](https://docs.flutter.dev/install/archive)
+- [Flutter app architecture guide](https://docs.flutter.dev/app-architecture/guide)
+- [Flutter architecture recommendations](https://docs.flutter.dev/app-architecture/recommendations)
+- [Flutter dependency injection case study](https://docs.flutter.dev/app-architecture/case-study/dependency-injection)
+- [provider package](https://pub.dev/packages/provider)
