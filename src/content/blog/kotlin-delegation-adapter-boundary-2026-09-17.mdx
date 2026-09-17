@@ -1,0 +1,323 @@
+---
+title: "Spring Boot 개발자를 위한 Kotlin 열한째 걸음: by delegation으로 어댑터 경계 줄이기"
+description: "Java 상속, Spring 프록시, decorator 패턴에 익숙한 개발자를 위해 Kotlin class delegation과 delegated property를 서버 코드에서 어디까지 써야 하는지 정리합니다."
+publishedAt: 2026-09-17T08:55:00+09:00
+draft: false
+category: "Backend"
+tags: ["Kotlin", "Delegation", "Spring Boot", "Decorator", "Java Interop"]
+kind: "learning"
+heroImage: "../../assets/blog/kotlin-delegation-adapter-boundary-2026-09-17/cover.webp"
+heroImageAlt: "Kotlin by delegation이 service interface, decorator, lazy property 경계를 가볍게 연결하는 무텍스트 백엔드 학습 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 Kotlin 학습"
+lesson: 11
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 9월 17일에 Kotlin 공식 홈페이지, Kotlin delegation 문서, delegated properties 문서,
+> properties 문서를 확인했습니다. 기준 안정 버전은 `Kotlin 2.4.20`입니다. JetBrains는 2026년 9월 7일
+> Kotlin 2.4.20 정식 릴리스를 공지했습니다. 이 글에서는 오래전부터 안정적으로 제공된 `by` delegation과
+> 표준 delegated property 사용법만 다룹니다.
+
+## 결론부터 말하면
+
+Kotlin의 `by` delegation은 "내가 직접 구현하지 않고, 이 객체에게 맡긴다"를 언어 문법으로 드러내는 기능입니다.
+Spring Boot 개발자에게는 decorator, adapter, proxy, composition을 짧게 쓰는 도구라고 보면 됩니다.
+
+다만 모든 service를 `by`로 감싸면 오히려 숨겨진 forwarding 코드가 됩니다. 첫 기준은 단순합니다.
+
+- interface의 대부분 동작을 그대로 위임하고 일부만 바꿀 때 class delegation을 씁니다.
+- cross-cutting concern 전체는 Spring AOP나 filter, interceptor가 더 낫습니다.
+- 설정값, lazy 초기화, map 기반 DTO 접근처럼 property 접근 규칙을 재사용할 때 delegated property를 씁니다.
+- JPA entity의 필드, request DTO의 단순 값, 팀원이 바로 읽어야 하는 business 필드는 평범한 property로 둡니다.
+- delegation은 상속을 줄이는 도구이지, 의존성 주입이나 트랜잭션 경계를 숨기는 도구가 아닙니다.
+
+## 이번 주 개념
+
+Kotlin에는 크게 두 종류의 delegation이 있습니다.
+
+첫째는 **class delegation**입니다. 어떤 class가 interface를 구현할 때, 구현을 다른 객체에게 넘길 수 있습니다.
+
+```kotlin
+interface PriceCalculator {
+    fun total(items: List<Int>): Int
+}
+
+class DefaultPriceCalculator : PriceCalculator {
+    override fun total(items: List<Int>): Int = items.sum()
+}
+
+class LoggingPriceCalculator(
+    private val delegate: PriceCalculator,
+) : PriceCalculator by delegate {
+    override fun total(items: List<Int>): Int {
+        val result = delegate.total(items)
+        println("total=$result")
+        return result
+    }
+}
+```
+
+`LoggingPriceCalculator`는 `PriceCalculator`의 모든 멤버를 기본적으로 `delegate`에 맡깁니다. 그중 `total()`만
+직접 덮어썼습니다. Java라면 모든 method를 forwarding하거나 IDE 생성 코드에 의존했을 부분입니다.
+
+둘째는 **delegated property**입니다. property의 `get` 또는 `set` 동작을 별도 객체나 표준 delegate에 맡깁니다.
+
+```kotlin
+class ReportCache {
+    val expensiveSummary: String by lazy {
+        println("build summary once")
+        "summary"
+    }
+}
+```
+
+`lazy`는 처음 접근할 때 값을 계산하고, 이후에는 같은 값을 돌려줍니다. "필드가 있다"는 모양은 유지하면서 접근 규칙만
+분리합니다.
+
+<Mermaid title="Kotlin delegation의 두 사용처">
+{`flowchart LR
+  Interface["Service interface"] --> Delegate["Concrete implementation"]
+  Wrapper["Delegating wrapper"] --> Delegate
+  Wrapper --> Override["override only changed behavior"]
+
+  Property["Property"] --> Rule["Delegate rule"]
+  Rule --> Lazy["lazy cache"]
+  Rule --> Map["map-backed value"]
+  Rule --> Observe["observable change"]
+`}
+</Mermaid>
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Java에서 decorator를 만들면 forwarding 코드가 빠르게 늘어납니다.
+
+```java
+public class LoggingPriceCalculator implements PriceCalculator {
+    private final PriceCalculator delegate;
+
+    public LoggingPriceCalculator(PriceCalculator delegate) {
+        this.delegate = delegate;
+    }
+
+    @Override
+    public int total(List<Integer> items) {
+        int result = delegate.total(items);
+        System.out.println("total=" + result);
+        return result;
+    }
+}
+```
+
+method가 하나라면 괜찮습니다. 하지만 interface에 method가 8개 있고 그중 하나만 바꾸고 싶다면 나머지 7개를 모두
+위임해야 합니다. 이때 누락된 forwarding, 잘못 넘긴 인자, IDE가 만든 무의미한 코드가 생깁니다.
+
+Spring에서는 비슷한 문제를 proxy와 AOP로 다룹니다. 예를 들어 트랜잭션, 보안, 캐시, metrics 같은 공통 관심사는
+Spring이 만든 proxy가 감쌉니다. 이 접근은 강력하지만, "이 한 구현체의 일부 동작만 살짝 바꾼다"는 작은 adapter에는
+무겁습니다.
+
+Kotlin class delegation은 그 작은 틈에 잘 맞습니다.
+
+## Kotlin에서는 무엇이 다른가
+
+Kotlin은 interface 구현을 선언부에서 위임합니다.
+
+```kotlin
+class AuditedPriceCalculator(
+    private val delegate: PriceCalculator,
+    private val audit: AuditSink,
+) : PriceCalculator by delegate {
+    override fun total(items: List<Int>): Int {
+        val result = delegate.total(items)
+        audit.record("price.total", mapOf("count" to items.size, "result" to result))
+        return result
+    }
+}
+```
+
+이 class는 "대부분은 delegate와 같고, `total`만 audit을 추가한다"는 의도를 한눈에 보여 줍니다. 상속을 쓰지 않았기
+때문에 base class의 protected 상태나 lifecycle에 묶이지도 않습니다.
+
+다만 Spring Bean으로 쓸 때는 생성자 주입과 scope를 그대로 존중해야 합니다.
+
+```kotlin
+@Configuration
+class PriceConfig {
+    @Bean
+    fun priceCalculator(repository: PriceRepository): PriceCalculator =
+        DefaultPriceCalculator(repository)
+
+    @Bean
+    fun auditedPriceCalculator(
+        priceCalculator: PriceCalculator,
+        auditSink: AuditSink,
+    ): PriceCalculator =
+        AuditedPriceCalculator(priceCalculator, auditSink)
+}
+```
+
+실제 프로젝트에서는 bean이 두 개 생기면 주입 모호성이 생깁니다. `@Primary`, qualifier, 별도 interface 분리 중 하나를
+명확히 선택해야 합니다. Kotlin의 `by`가 Spring의 bean 선택 문제를 없애 주지는 않습니다.
+
+## 대응 개념 비교
+
+| Java/Spring 습관 | Kotlin delegation | 판단 기준 |
+|---|---|---|
+| decorator class | `class X(delegate) : Interface by delegate` | 대부분 위임하고 일부만 바꿀 때 |
+| abstract base class | interface + delegation | 상태 상속 없이 기능 조합이 필요할 때 |
+| Spring AOP | Spring AOP 유지 | transaction, security, tracing처럼 전역 관심사 |
+| lazy field 초기화 | `val value by lazy { ... }` | 계산 비용이 있고 첫 접근 때 만들어도 될 때 |
+| map 기반 dynamic DTO | `val name: String by map` | 외부 key-value를 읽기 전용 view로 다룰 때 |
+| setter side effect | `Delegates.observable` | 값 변경 알림이 property 규칙일 때 |
+
+## 최소 실행 예제
+
+아래 코드는 Spring 없이 실행할 수 있는 작은 예제입니다. 핵심은 할인 계산 자체와 감사 기록을 분리하는 것입니다.
+
+```kotlin
+interface DiscountPolicy {
+    fun discount(amount: Int): Int
+}
+
+class FixedDiscountPolicy(
+    private val rate: Int,
+) : DiscountPolicy {
+    override fun discount(amount: Int): Int = amount * rate / 100
+}
+
+class AuditedDiscountPolicy(
+    private val delegate: DiscountPolicy,
+    private val audit: MutableList<String>,
+) : DiscountPolicy by delegate {
+    override fun discount(amount: Int): Int {
+        val discount = delegate.discount(amount)
+        audit += "amount=$amount discount=$discount"
+        return discount
+    }
+}
+
+fun main() {
+    val audit = mutableListOf<String>()
+    val policy: DiscountPolicy = AuditedDiscountPolicy(
+        delegate = FixedDiscountPolicy(rate = 10),
+        audit = audit,
+    )
+
+    println(policy.discount(12_000))
+    println(audit)
+}
+```
+
+`AuditedDiscountPolicy`는 할인 알고리즘을 알지 못합니다. 대신 "계산 전후에 무엇을 기록할지"만 책임집니다.
+테스트도 두 방향으로 나눌 수 있습니다.
+
+```kotlin
+fun auditedPolicyRecordsResult() {
+    val audit = mutableListOf<String>()
+    val policy = AuditedDiscountPolicy(FixedDiscountPolicy(10), audit)
+
+    check(policy.discount(1000) == 100)
+    check(audit == listOf("amount=1000 discount=100"))
+}
+```
+
+## delegated property는 언제 쓰는가
+
+서버 코드에서 delegated property의 첫 사용처는 보통 `lazy`입니다.
+
+```kotlin
+class ReportRenderer(
+    private val rows: List<String>,
+) {
+    private val normalizedRows by lazy {
+        rows.map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
+    fun render(): String = normalizedRows.joinToString("\n")
+}
+```
+
+이 코드는 `render()`가 호출되지 않으면 정규화도 하지 않습니다. 같은 renderer 안에서는 한 번만 계산합니다.
+그렇다고 모든 값을 `lazy`로 바꿀 필요는 없습니다. 값 계산이 싸고 constructor에서 실패를 빨리 드러내야 한다면
+그냥 초기화하는 편이 낫습니다.
+
+map-backed property도 가끔 유용합니다.
+
+```kotlin
+class RuntimeContext(values: Map<String, String>) {
+    val appVersion: String by values
+    val modelVersion: String by values
+}
+```
+
+이 방식은 외부 key-value를 읽기 전용 view로 감쌀 때 깔끔합니다. 하지만 공개 API 응답 DTO에서 key가 바뀔 수 있거나,
+누락 시 오류 메시지를 세밀하게 제어해야 한다면 명시적인 parsing 함수가 더 안전합니다.
+
+## Java 개발자가 자주 하는 오해
+
+### delegation은 상속보다 항상 낫다
+
+상속을 피하는 좋은 선택지가 될 수는 있지만 항상 답은 아닙니다. framework가 상속 지점을 명확히 제공하거나,
+base class가 lifecycle을 책임지는 구조라면 delegation만으로 바꾸는 것이 오히려 이상해질 수 있습니다.
+
+### by를 쓰면 proxy가 된다
+
+`by`는 compile-time forwarding에 가깝습니다. Spring proxy처럼 method 호출을 런타임에 가로채서 annotation,
+transaction, security를 자동 적용하는 장치가 아닙니다. 공통 횡단 관심사는 Spring이 이미 잘하는 영역에 남겨도 됩니다.
+
+### lazy는 캐시와 같다
+
+`lazy`는 property 초기화를 미루고 같은 instance 안에서 값을 재사용합니다. distributed cache, request cache,
+TTL cache와는 다릅니다. 사용자별 값이나 요청별 값이 섞이면 instance 생명주기부터 다시 확인해야 합니다.
+
+### delegated property는 DTO를 멋지게 만든다
+
+멋있어 보인다고 DTO에 무조건 쓰면 검증 오류가 늦게 터집니다. 외부 입력은 "어떤 key가 없으면 어떤 오류인가"가 중요합니다.
+그 경우에는 생성자, factory, validator가 더 읽기 쉽습니다.
+
+## Spring Boot에서의 사용 기준
+
+Spring Boot 프로젝트에서는 아래처럼 선을 긋는 편이 안전합니다.
+
+- `Repository`, `Client`, `Service`의 장기 의존성은 생성자 주입으로 보입니다.
+- 일부 구현만 바꾸는 wrapper는 delegation 후보입니다.
+- 요청 추적, 보안, 트랜잭션은 Spring infrastructure 후보입니다.
+- 계산 비용이 큰 내부 파생값은 `lazy` 후보입니다.
+- 외부 입력 검증, DB entity 상태, 공개 응답 필드는 명시적인 property 후보입니다.
+
+아래처럼 service의 핵심 의존성을 숨기는 코드는 피합니다.
+
+```kotlin
+class OrderService(
+    repository: OrderRepository,
+) : OrderRepository by repository {
+    fun approve(orderId: Long) {
+        saveApproved(orderId)
+    }
+}
+```
+
+`OrderService`가 repository처럼 보이게 됩니다. service public API와 repository API가 섞여서, 어느 layer가 어떤 책임을
+가지는지 흐려집니다. 이럴 때는 delegation보다 명시적인 생성자 주입과 method 호출이 낫습니다.
+
+## 연습 문제
+
+1. `PaymentClient` interface와 `HttpPaymentClient` 구현체를 만들고, 실패 횟수를 기록하는 `MeteredPaymentClient`를
+   class delegation으로 감싸 보세요.
+2. `val normalizedEmail by lazy { ... }`를 가진 작은 command class를 만들고, constructor에서 즉시 검증하는 방식과
+   어떤 차이가 있는지 비교해 보세요.
+3. Spring Bean 두 개가 같은 interface를 구현할 때 `@Primary`와 qualifier 중 무엇이 더 읽기 좋은지 팀 코드 기준으로
+   판단해 보세요.
+4. 지금 프로젝트의 decorator, adapter, wrapper 중 forwarding 코드가 많은 class 하나를 찾아 `by` delegation으로 줄일 수
+   있는지 검토해 보세요. 단, transaction과 security annotation은 그대로 보이는지 확인하세요.
+
+## 참고자료
+
+- [Kotlin 공식 홈페이지](https://kotlinlang.org/) - Kotlin 2.4.20 최신 안정 릴리스 확인
+- [Kotlin Delegation](https://kotlinlang.org/docs/delegation.html) - class delegation 기본 문법
+- [Kotlin Delegated properties](https://kotlinlang.org/docs/delegated-properties.html) - delegated property와 변환 규칙
+- [Kotlin Properties](https://kotlinlang.org/docs/properties.html) - property와 delegation 개요

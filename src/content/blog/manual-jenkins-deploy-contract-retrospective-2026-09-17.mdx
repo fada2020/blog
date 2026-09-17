@@ -1,0 +1,247 @@
+---
+title: "수동 배포 회고: CI가 막혀도 배포 계약은 하나여야 합니다"
+description: "GitHub Actions 사용량 소진에 대응해 Jenkins 수동 배포 경로를 준비한 경험을 일반화해, 수동 실행과 자동 배포가 같은 검증·락·원격 실행 계약을 공유해야 하는 이유를 정리합니다."
+publishedAt: 2026-09-17T09:05:00+09:00
+draft: false
+category: "DevOps"
+tags: ["Jenkins", "CI CD", "Laravel", "AWS SSM", "Deployment"]
+kind: "worklog"
+heroImage: "../../assets/blog/manual-jenkins-deploy-contract-retrospective-2026-09-17/cover.webp"
+heroImageAlt: "수동 Jenkins 배포가 Git 고정, 락, SSM 원격 실행, Laravel 캐시 갱신, 검증 결과로 이어지는 무텍스트 DevOps 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 범위**
+>
+> 2026년 9월 17일에 Jenkins Lockable Resources Pipeline Step 문서, AWS Systems Manager Run Command 문서와
+> AWS CLI `ssm send-command` 문서, Laravel 12.x Deployment 문서를 확인했습니다. 실제 업무일지의 회사명,
+> 저장소명, 서버명, 브랜치 운영명, 내부 Jenkins 주소, 계정과 배포 대상 식별자는 공개 글에서 제거했습니다.
+> 이 글은 PHP/Laravel 서비스를 예로 든 배포 설계 회고이며, 실제 운영 배포 성공을 증명하는 글이 아닙니다.
+
+## 결론부터 말하면
+
+CI 사용량이 막혔다고 해서 배포 절차까지 즉흥적으로 바뀌면 위험합니다. 버튼을 누르는 장소는 GitHub Actions에서
+Jenkins로 바뀔 수 있습니다. 하지만 배포가 지나가는 계약은 같아야 합니다.
+
+이번 회고의 핵심은 세 가지였습니다.
+
+- 수동 배포도 실행 시점의 Git commit SHA를 고정해야 합니다.
+- 같은 환경으로 동시에 두 배포가 들어가지 않도록 락이 필요합니다.
+- 원격 서버 명령은 "전달했다"와 "성공했다"를 분리해서 확인해야 합니다.
+
+처음에는 "Actions 사용량이 부족하니 Jenkinsfile을 만들자"라는 단순한 작업처럼 보였습니다. 실제로는 자동 배포에서
+묵시적으로 보장하던 브랜치, 빌드 산출물, 서버 순서, migration, cache, queue restart, 결과 확인을 수동 경로에서도
+다시 드러내는 작업이었습니다.
+
+## 문제가 된 모양
+
+어떤 Laravel 서비스는 DEV, 운영 A, 운영 B처럼 대상이 나뉘어 있었습니다. 기존에는 GitHub Actions가 브랜치와 대상
+서버 그룹을 보고 배포했습니다. 그런데 Actions 사용량이 부족해지면 배포 버튼을 누를 곳이 사라집니다.
+
+가장 쉬운 해결은 운영자가 서버에 접속해서 `git pull`을 실행하는 것입니다. 하지만 이 방식은 곧 질문을 남깁니다.
+
+| 질문 | 즉흥 수동 배포의 위험 |
+|---|---|
+| 어떤 commit을 배포했는가 | 실행 중 branch head가 바뀔 수 있음 |
+| 같은 환경에 중복 배포가 들어왔는가 | race condition과 반쯤 갱신된 서버 발생 |
+| 어떤 서버까지 성공했는가 | 한 인스턴스 실패 후 나머지 상태가 흐려짐 |
+| migration은 언제 실행했는가 | 코드와 DB 순서가 어긋날 수 있음 |
+| queue worker는 새 코드를 쓰는가 | 오래 떠 있던 worker가 이전 코드를 계속 실행 |
+| 원격 명령 결과를 확인했는가 | SSM command id만 남고 실제 exit code를 놓침 |
+
+그래서 수동 Jenkins 배포는 "임시 우회로"가 아니라 기존 자동 배포와 같은 계약을 가진 별도 실행자로 보아야 했습니다.
+
+## 선택한 설계
+
+배포 파일은 환경별로 나누되, 실제 실행 규칙은 공통 스크립트로 모았습니다.
+
+```text
+Jenkins 수동 실행
+-> 대상 환경 선택
+-> Git commit SHA 고정
+-> 같은 앱/환경 락 획득
+-> 서버별 순차 원격 실행
+-> Laravel migration/cache/reload
+-> 원격 exit code 확인
+-> 결과 보고
+```
+
+<Mermaid title="수동 Jenkins 배포 계약">
+{`flowchart TD
+  Start["Manual Jenkins run"] --> Checkout["Checkout branch and pin commit SHA"]
+  Checkout --> Lock["Acquire deploy lock"]
+  Lock --> Plan["Resolve target instances"]
+  Plan --> SSM["Run remote command with SSM"]
+  SSM --> Laravel["Laravel deploy steps"]
+  Laravel --> Verify["Poll command status and exit code"]
+  Verify --> Report["Report deployed SHA and failed target"]
+`}
+</Mermaid>
+
+Jenkins Lockable Resources 문서는 `lock(resource: "...") { ... }` 형태의 Pipeline-compatible step을 제공합니다.
+이 단계는 같은 resource를 요구하는 빌드가 동시에 critical section에 들어가지 못하게 해 줍니다. 배포에서는 테스트 장비보다
+더 명확합니다. 같은 환경의 같은 앱 배포는 한 번에 하나만 들어가야 합니다.
+
+AWS Systems Manager Run Command는 관리형 노드에 원격 명령을 보낼 수 있는 도구입니다. AWS 문서는 Run Command API가
+분산 시스템 특성상 eventual consistency를 따른다고 설명합니다. 따라서 `send-command` 응답을 받았다는 사실과 각 노드의
+명령 실행 결과를 확인했다는 사실을 분리해야 합니다.
+
+## Jenkinsfile은 대상별로, 배포 규칙은 공통으로
+
+환경이 셋이면 Jenkinsfile도 셋이 되는 편이 운영자에게 읽기 쉽습니다.
+
+```text
+Jenkinsfile.dev
+Jenkinsfile.service-a
+Jenkinsfile.service-b
+```
+
+하지만 그 안에 배포 shell을 각각 복사하면 곧 drift가 생깁니다. 한 파일은 migration을 실행하고, 다른 파일은 queue를
+재시작하지 않고, 세 번째 파일은 SSM 실패를 무시하는 식입니다.
+
+그래서 Jenkinsfile은 대상 환경, 브랜치, 기본 옵션만 고르고 나머지는 공통 deploy script를 호출하게 두는 편이 낫습니다.
+
+```groovy
+stage("Deploy") {
+    steps {
+        lock(resource: "php-prod-deploy") {
+            sh "./deploy/jenkins/manual-deploy.sh prod ${env.GIT_COMMIT}"
+        }
+    }
+}
+```
+
+이 코드는 설명용으로 단순화한 예시입니다. 중요한 것은 Groovy가 모든 배포 세부를 품지 않는다는 점입니다. Jenkinsfile은
+실행 흐름을 보여 주고, shell script는 서버에서 반복되는 규칙을 담습니다.
+
+## Git SHA를 먼저 고정합니다
+
+수동 배포에서 가장 먼저 고정해야 할 값은 branch 이름이 아니라 commit SHA입니다.
+
+```text
+나쁜 기준: main 최신
+좋은 기준: main을 checkout한 뒤 얻은 정확한 commit SHA
+```
+
+브랜치 이름은 움직입니다. 운영자가 Jenkins 화면을 열고 버튼을 누르는 사이에도 새 commit이 push될 수 있습니다.
+배포 로그에는 "어떤 브랜치"가 아니라 "어떤 SHA"가 남아야 나중에 서버 파일, 장애 시각, rollback 판단을 맞출 수 있습니다.
+
+이 기준은 수동 배포를 더 느리게 만들지 않습니다. 오히려 장애가 났을 때 대화를 짧게 만듭니다.
+
+## 원격 실행은 전달과 성공을 나눕니다
+
+AWS CLI의 `ssm send-command`는 명령을 보냅니다. 하지만 배포는 여기서 끝나지 않습니다. 각 대상 인스턴스에서 명령이
+실제로 시작됐는지, 제한 시간 안에 끝났는지, exit code가 0인지, 표준 출력과 오류가 어디에 남았는지 확인해야 합니다.
+
+```text
+send-command 응답
+-> command id 확보
+-> instance별 invocation polling
+-> Success/Failed/TimedOut 구분
+-> 실패 대상과 로그 위치 보고
+```
+
+AWS CLI 문서는 command output을 CloudWatch Logs로 보낼 수 있는 옵션도 제공합니다. 운영자가 콘솔에서 마지막 200줄만
+보는 구조보다, command id와 로그 그룹을 함께 남기는 구조가 추적하기 쉽습니다.
+
+또 하나 중요한 값은 동시성과 실패 허용치입니다. 한 번에 모든 서버를 바꾸면 빠르지만, 첫 서버에서 실패한 스크립트가
+나머지 서버에도 퍼질 수 있습니다. Laravel 서비스처럼 인스턴스가 몇 대 되지 않는 경우에는 순차 배포가 더 단순한
+선택일 때가 많습니다.
+
+## Laravel 단계는 framework 계약을 따릅니다
+
+Laravel 공식 deployment 문서는 production 배포에서 configuration, event, route, view cache를 다루는 `php artisan optimize`
+를 설명합니다. 또한 새 버전 배포 후 queue worker, Reverb, Octane 같은 long-running service는 reload 또는 restart가
+필요하다고 안내합니다.
+
+수동 배포도 이 계약을 빼먹으면 안 됩니다.
+
+```bash
+php artisan migrate --force
+php artisan optimize
+php artisan reload
+```
+
+프로젝트가 아직 `reload` 대신 `queue:restart`와 별도 process manager를 쓴다면 그 방식을 따르면 됩니다. 핵심은
+"PHP 파일만 바뀌었다"와 "long-running process가 새 코드를 사용한다"가 다른 상태라는 점입니다.
+
+Composer install, frontend build, nginx reload도 마찬가지입니다. 항상 실행해야 하는 단계와 변경이 있을 때만 실행해도 되는
+단계를 분리하되, 건너뛴 이유가 로그에 남아야 합니다.
+
+## 수동 옵션은 적을수록 좋습니다
+
+수동 배포 화면에 옵션이 많아지면 운영자는 배포 때마다 작은 설계를 다시 해야 합니다.
+
+좋은 옵션은 실행 전 결정이 꼭 필요한 값입니다.
+
+- 대상 환경
+- migration 실행 여부
+- optional nginx reload 여부
+- 배포할 commit 또는 branch
+
+나쁜 옵션은 실수로 계약을 깨기 쉬운 값입니다.
+
+- 락 비활성화
+- 실패 무시
+- commit 고정 생략
+- SSM 결과 polling 생략
+- cache 갱신 생략
+
+긴급 상황일수록 옵션은 적어야 합니다. 우회 버튼은 있어도 우회 계약은 없어야 합니다.
+
+## 검증은 실제 배포와 모의 검증을 구분합니다
+
+이번 유형의 작업에서 헷갈리기 쉬운 표현이 있습니다.
+
+```text
+Jenkinsfile 작성 완료
+shell syntax 검사 완료
+AWS CLI 모의 함수 검증 완료
+Jenkins job 등록 완료
+실제 DEV 배포 성공
+실제 운영 배포 성공
+배포 후 API 동작 확인
+```
+
+이들은 모두 다른 상태입니다. 파일을 만들고 모의 검증을 통과했다고 실제 Jenkins credential, agent 도구, AWS SSM 권한,
+서버의 PHP/Composer/Node 상태, Laravel migration 권한이 검증된 것은 아닙니다.
+
+실제 운영 전에는 최소한 아래를 나눠 확인해야 합니다.
+
+- Jenkins agent에 Git, AWS CLI, bash, 필요한 credential이 있는지 확인합니다.
+- SSM 대상 인스턴스가 managed node로 보이고 command를 받을 수 있는지 확인합니다.
+- DEV에서 no-op 또는 작은 변경 배포를 실행해 command polling과 실패 처리를 확인합니다.
+- migration이 있는 배포와 없는 배포를 각각 기록합니다.
+- 배포 후 `/up` 같은 health route 또는 대표 API를 확인합니다.
+
+## 배운 점
+
+수동 배포는 자동화의 반대가 아닙니다. 자동 trigger가 빠진 자동화입니다. 사람은 시작 버튼을 누르지만,
+그 뒤의 브랜치 고정, 락, 서버 선택, 원격 실행, Laravel 갱신, 결과 확인은 기계적으로 같아야 합니다.
+
+CI/CD 경로가 둘이 되면 운영 편의는 올라가지만, drift 위험도 같이 올라갑니다. 그래서 Jenkinsfile을 추가하는 작업의
+핵심은 Groovy 파일을 만드는 것이 아니라 **배포 계약을 한 문장으로 설명할 수 있게 만드는 것**이었습니다.
+
+이번 회고의 문장은 이렇습니다.
+
+> 어떤 버튼에서 시작하든, 같은 commit SHA가 같은 락과 같은 원격 실행 확인을 지나 서버에 도착해야 한다.
+
+## 실무 체크리스트
+
+- [ ] 수동 배포도 branch 이름이 아니라 commit SHA를 로그에 남깁니다.
+- [ ] 같은 앱·환경에 동시에 두 배포가 들어가지 않도록 Jenkins lock을 둡니다.
+- [ ] `send-command` 응답과 instance별 command 성공을 분리해 확인합니다.
+- [ ] 실패한 대상 인스턴스와 command id, 로그 위치를 결과에 남깁니다.
+- [ ] Laravel migration, cache, queue/reload 단계를 framework 계약에 맞춰 실행합니다.
+- [ ] 모의 AWS 검증, Jenkins 등록, 실제 DEV 배포, 운영 배포, API 동작 확인을 서로 다른 상태로 기록합니다.
+- [ ] GitHub Actions가 복구된 뒤 중복 배포 경로가 동시에 트리거되지 않도록 운영 규칙을 정리합니다.
+
+## 참고자료
+
+- [Jenkins Lockable Resources Pipeline Step](https://www.jenkins.io/doc/pipeline/steps/lockable-resources/)
+- [AWS Systems Manager Run Command](https://docs.aws.amazon.com/systems-manager/latest/userguide/run-command.html)
+- [AWS CLI ssm send-command](https://docs.aws.amazon.com/cli/latest/reference/ssm/send-command.html)
+- [Laravel 12.x Deployment](https://laravel.com/docs/12.x/deployment)
