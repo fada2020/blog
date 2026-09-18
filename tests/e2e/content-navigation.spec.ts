@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /CI가 막혀도/ })
+    .getByRole("link", { name: /9월 셋째 주말/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/manual-jenkins-deploy-contract-retrospective-2026-09-17\/$/,
+    /\/blog\/posts\/toddler-september-third-weekend-plan-2026-09-18\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "수동 배포 회고: CI가 막혀도 배포 계약은 하나여야 합니다",
+    "24개월 아이 케어: 9월 셋째 주말은 짧은 외출과 회복일로 나누기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "수동 Jenkins 배포가 Git 고정, 락, SSM 원격 실행, Laravel 캐시 갱신, 검증 결과로 이어지는 무텍스트 DevOps 다이어그램",
+    "24개월 아이의 지원 제도, 수족구병 체크, 짧은 외출, 회복일, 월요일 등원 준비를 나누어 보는 무텍스트 주말 플랜 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /CI가 막혀도/,
+      name: /9월 셋째 주말/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /by delegation/,
+      name: /inline과 reified/,
     }),
   ).toBeVisible();
 });
@@ -150,7 +150,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("학습 글");
   await expect(
     page.getByRole("link", {
-      name: /Spring Boot 개발자를 위한 Kotlin 열한째 걸음/,
+      name: /Spring Boot 개발자를 위한 Kotlin 열두째 걸음/,
     }),
   ).toBeVisible();
 
