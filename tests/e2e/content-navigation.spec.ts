@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /9월 셋째 주말/ })
+    .getByRole("link", { name: /금리 5% 근처/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/toddler-september-third-weekend-plan-2026-09-18\/$/,
+    /\/blog\/posts\/saturday-market-fed-yields-ai-chip-2026-09-19\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "24개월 아이 케어: 9월 셋째 주말은 짧은 외출과 회복일로 나누기",
+    "토요일 주식 학습: 금리 5% 근처에서 AI 반도체 랠리 읽기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "24개월 아이의 지원 제도, 수족구병 체크, 짧은 외출, 회복일, 월요일 등원 준비를 나누어 보는 무텍스트 주말 플랜 다이어그램",
+    "미국 기준금리, 10년물 금리, 달러 원 환율, AI 반도체, KOSPI가 연결된 무텍스트 시장 리스크 지도",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /9월 셋째 주말/,
+      name: /금리 5% 근처/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /inline과 reified/,
+      name: /annotation target/,
     }),
   ).toBeVisible();
 });
@@ -150,7 +150,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("학습 글");
   await expect(
     page.getByRole("link", {
-      name: /Spring Boot 개발자를 위한 Kotlin 열두째 걸음/,
+      name: /Spring Boot 개발자를 위한 Kotlin 열셋째 걸음/,
     }),
   ).toBeVisible();
 
