@@ -1,0 +1,215 @@
+---
+title: "일요일 기술 심화: Spring Boot 4.1에서 SSRF 방어를 HTTP client 경계에 두기"
+description: "Spring Boot 4.1.1의 InetAddressFilter와 OWASP SSRF 방어 원칙을 기준으로 외부 호출 허용 목록, redirect, DNS, 테스트 경계를 정리합니다."
+publishedAt: 2026-09-20T08:59:00+09:00
+draft: false
+category: "Backend"
+tags: ["Spring Boot", "Security", "SSRF", "RestClient", "WebClient"]
+kind: "deep-dive"
+heroImage: "../../assets/blog/spring-boot-ssrf-http-client-boundary-2026-09-20/cover.webp"
+heroImageAlt: "Spring Boot HTTP client에서 외부 URL 입력, DNS 해석, InetAddressFilter, 허용된 외부 서비스가 단계별로 나뉜 무텍스트 보안 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "주간 기술 심화"
+lesson: 4
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 범위**
+>
+> 2026년 9월 20일 KST에 Spring Boot 4.1.1 reference documentation, Spring Boot 4.1 release notes,
+> OWASP Server-Side Request Forgery Prevention Cheat Sheet를 확인했습니다. 기준 안정 버전은 `Spring Boot 4.1.1`입니다.
+> Spring Boot 4.2.0-M1과 snapshot 문서는 안정 기능으로 다루지 않았습니다.
+
+## 이번 주에 이 기술이 중요했던 이유
+
+요즘 Spring Boot 애플리케이션은 내부 API만 호출하지 않습니다. 파일 미리보기, webhook 검증, 외부 결제, 지도, AI API,
+파트너 callback처럼 사용자가 준 URL이나 외부 설정을 바탕으로 서버가 다시 HTTP 요청을 보내는 흐름이 많습니다.
+
+문제는 이 흐름이 곧 SSRF(Server-Side Request Forgery) 경계라는 점입니다. 서버가 공격자 대신 내부망, metadata endpoint,
+관리자용 API를 호출하게 되면 controller validation만으로는 막기 어렵습니다.
+
+Spring Boot 4.1은 이 지점을 HTTP client 설정의 문제로 끌어올렸습니다. release notes와 reference 문서는 blocking client와
+reactive client 모두에 `InetAddressFilter`를 적용해 outgoing request 주소를 제한할 수 있다고 설명합니다.
+
+오늘의 질문은 단순합니다.
+
+**URL을 받은 뒤 검증하는 코드와, 실제 HTTP client가 연결하는 주소 사이의 틈을 어떻게 줄일 것인가?**
+
+## 핵심 개념
+
+SSRF 방어는 "URL 문자열이 그럴듯한가"에서 끝나지 않습니다. URL은 scheme, host, redirect, DNS 해석, 최종 IP 주소,
+프록시 설정을 지나서 실제 연결로 바뀝니다.
+
+| 단계 | 흔한 착각 | 실제로 봐야 할 것 |
+|---|---|---|
+| 입력 문자열 | `https://`면 안전하다 | 허용된 business domain인지 |
+| host 검증 | domain allowlist면 충분하다 | DNS가 내부 IP로 바뀌지 않는지 |
+| redirect | 302는 client가 알아서 따라간다 | redirect 이후 주소도 같은 규칙을 통과하는지 |
+| HTTP client | service 코드에서 이미 검사했다 | client가 최종 연결 주소를 제한하는지 |
+| 네트워크 | 애플리케이션만 막으면 된다 | egress firewall, proxy, cloud metadata 보호도 있는지 |
+
+OWASP는 SSRF 방어를 두 경우로 나눕니다. 호출 대상이 정해진 업무 흐름이라면 allowlist가 가능합니다. 반대로 임의의 외부 주소를
+열어야 하는 기능이라면 애플리케이션 계층과 네트워크 계층의 방어를 같이 둬야 합니다.
+
+Spring Boot의 `InetAddressFilter`는 이 중 HTTP client 경계를 맡습니다.
+
+## 내부 동작 감각
+
+Spring Boot 4.1.1 reference 문서는 HTTP client 공통 설정을 `HttpClientSettings`로 표현합니다. 이 설정에는 timeout,
+redirect policy, SSL bundle 같은 값과 함께 `InetAddressFilter`를 붙일 수 있습니다.
+
+<Mermaid title="HTTP client SSRF 방어 경계">
+{`flowchart LR
+  Input["user supplied URL"] --> Normalize["business validation"]
+  Normalize --> Client["RestClient or WebClient"]
+  Client --> Resolve["DNS resolution"]
+  Resolve --> Filter["InetAddressFilter"]
+  Filter --> External["allowed external address"]
+  Filter --> Blocked["blocked private or local address"]
+  Blocked --> Log["security event"]
+`}
+</Mermaid>
+
+핵심은 service method마다 URL 검증 코드를 흩뿌리지 않는 것입니다. 외부 호출을 만드는 client builder, request factory,
+connector 쪽에 공통 필터를 붙여야 "어느 코드 경로에서 호출했는가"와 상관없이 마지막 연결 주소가 같은 규칙을 통과합니다.
+
+## Spring Boot 4.1에서 달라진 점
+
+Spring Boot 4.1 release notes는 `InetAddressFilter`를 HTTP Client SSRF Mitigation 항목으로 소개합니다. reference 문서의
+안정판은 `Spring Boot 4.1.1`이고, 문서 하단의 stable 목록에서도 4.1.1이 현재 안정 문서로 보입니다.
+
+문서의 Kotlin 예시는 `InetAddressFilter.externalAddresses()`를 만든 뒤 `HttpClientSettings`에 필터로 넣습니다.
+그 설정으로 `ClientHttpRequestFactory`를 만들고, 마지막에 `RestClient`에 연결합니다.
+
+```kotlin
+import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder
+import org.springframework.boot.http.client.HttpClientSettings
+import org.springframework.boot.http.client.InetAddressFilter
+import org.springframework.http.client.ClientHttpRequestFactory
+import org.springframework.stereotype.Service
+import org.springframework.web.client.RestClient
+
+@Service
+class PartnerPreviewClient {
+    private val restClient: RestClient
+
+    init {
+        val externalOnly = InetAddressFilter.externalAddresses()
+        val settings = HttpClientSettings.defaults()
+            .withInetAddressFilter(externalOnly)
+        val requestFactory: ClientHttpRequestFactory =
+            ClientHttpRequestFactoryBuilder.jdk().build(settings)
+
+        restClient = RestClient.builder()
+            .requestFactory(requestFactory)
+            .build()
+    }
+}
+```
+
+실무에서는 여기서 한 단계 더 나눕니다. 정말 아무 외부 주소나 필요하다면 `externalAddresses()`가 출발점입니다. 하지만 결제사,
+파트너 API, 사내 공개 gateway처럼 대상이 정해진 흐름이라면 허용 대역이나 domain 정책을 더 좁게 잡습니다.
+
+## Java/Spring 팀의 설계 기준
+
+Spring Boot 팀에서 바로 적용할 때는 세 계층을 분리합니다.
+
+| 계층 | 책임 | 코드 리뷰 질문 |
+|---|---|---|
+| 입력 검증 | 업무상 허용된 URL 형식과 domain인지 확인 | 이 기능은 allowlist가 가능한가 |
+| HTTP client 설정 | 최종 연결 주소 제한, timeout, redirect policy | 모든 client 생성 경로에 적용되는가 |
+| 네트워크 정책 | metadata endpoint, 내부망, 관리망 접근 차단 | 애플리케이션 실수도 막는가 |
+
+controller에서 `URI.create(url)`만 해 보고 끝내면 부족합니다. redirect를 따라가는 client라면 처음 URL은 외부 domain이었지만,
+최종 연결은 private address가 될 수 있습니다. DNS도 시간이 지나며 바뀔 수 있습니다.
+
+그래서 "입력에서 막고, client에서 다시 막고, 네트워크에서 마지막으로 막는다"가 기본입니다.
+
+## 최소 적용 예시
+
+외부 preview 기능을 예로 들어 봅니다.
+
+```kotlin
+data class PreviewRequest(
+    val url: String,
+)
+
+class PreviewPolicy(
+    private val allowedHosts: Set<String>,
+) {
+    fun validate(rawUrl: String): URI {
+        val uri = URI(rawUrl)
+        require(uri.scheme == "https") { "https URL만 허용합니다." }
+        require(uri.host in allowedHosts) { "허용된 host가 아닙니다." }
+        return uri
+    }
+}
+```
+
+이 코드는 업무 규칙입니다. 하지만 이것만으로는 충분하지 않습니다. 실제 HTTP client에도 egress 제한을 둡니다.
+
+```kotlin
+@Configuration(proxyBeanMethods = false)
+class OutboundHttpSecurityConfiguration {
+    @Bean
+    fun httpClientInetAddressFilter(): InetAddressFilter {
+        return InetAddressFilter.externalAddresses()
+    }
+}
+```
+
+Spring Boot 문서는 `InetAddressFilter`를 `@Bean`으로 정의하면 auto-configured HTTP client builders에 적용할 수 있다고
+설명합니다. 그래서 팀 규칙은 "직접 `RestClient.create()`를 쓰지 않고, auto-configured builder를 주입받는다"까지 포함해야 합니다.
+
+## 자주 하는 오해
+
+첫 번째 오해는 domain allowlist만 있으면 SSRF가 끝난다는 생각입니다. OWASP는 domain 검증과 함께 DNS 해석, allowlist monitoring,
+네트워크 계층 방어를 함께 봅니다.
+
+두 번째 오해는 `RestClient`, `RestTemplate`, `WebClient` 중 하나만 막으면 된다는 생각입니다. 같은 애플리케이션 안에 세 client가
+섞여 있으면 우회 경로가 생깁니다. outgoing HTTP client 목록을 먼저 찾아야 합니다.
+
+세 번째 오해는 redirect를 사용자 경험 문제로만 보는 것입니다. SSRF에서는 redirect가 방어 우회 경로가 될 수 있습니다.
+기본 정책을 `dont-follow`로 두고, 정말 필요한 client만 별도 검토하는 편이 안전합니다.
+
+네 번째 오해는 SSRF 방어를 보안팀 rule로만 보는 것입니다. Spring Boot 개발자가 client builder를 어떻게 주입받고, 테스트에서
+어떤 주소를 차단 확인하는지가 실제 방어선입니다.
+
+## 테스트 체크리스트
+
+운영 적용 전에 최소한 다음을 자동화합니다.
+
+| 테스트 | 기대 결과 |
+|---|---|
+| `https://allowed.example.com` | 허용 |
+| `http://allowed.example.com` | 차단 |
+| `https://127.0.0.1` | 차단 |
+| `https://localhost` | 차단 |
+| `https://169.254.169.254` | 차단 |
+| 허용 domain에서 내부 IP로 redirect | 차단 |
+| 허용 domain의 DNS가 private address로 변함 | 차단 또는 경보 |
+
+중요한 것은 실패 모양입니다. 차단은 조용한 timeout이 아니라, 로그와 metric으로 남아야 합니다. 그래야 실제 공격인지,
+잘못된 설정인지, 테스트 fixture 문제인지 구분할 수 있습니다.
+
+## 다음에 확인할 지표
+
+- repository 안에서 `RestClient.create`, `new RestTemplate`, `WebClient.create`가 남아 있는지
+- auto-configured builder를 우회하는 HTTP client가 있는지
+- redirect policy가 기본적으로 열려 있는지
+- cloud metadata endpoint와 내부망 대역이 네트워크 계층에서도 막혀 있는지
+- SSRF 차단 로그가 alert 피로도를 만들지 않는 수준으로 집계되는지
+- Spring Boot 4.1.x patch release에서 HTTP client 설정 관련 변경이 있는지
+
+오늘의 결론은 위치입니다. SSRF 방어는 controller validator 안에만 있으면 너무 앞에 있습니다. Spring Boot 4.1의
+`InetAddressFilter`는 실제 outgoing HTTP client 경계에 방어선을 놓을 수 있게 해 줍니다. 입력 검증, client 필터,
+네트워크 정책을 나눠 두면 외부 URL 기능을 없애지 않고도 실패 방식을 더 예측 가능하게 만들 수 있습니다.
+
+## 참고자료
+
+- [Spring Boot 4.1.0 available now](https://spring.io/blog/2026/06/10/spring-boot-4/)
+- [Spring Boot 4.1 Release Notes](https://github.com/spring-projects/spring-boot/wiki/Spring-Boot-4.1-Release-Notes)
+- [Spring Boot 4.1.1 Reference - Calling REST Services](https://docs.spring.io/spring-boot/4.1/reference/io/rest-client.html)
+- [OWASP Server-Side Request Forgery Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html)

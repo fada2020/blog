@@ -9,15 +9,15 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(77);
+  expect(entries).toHaveLength(79);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "토요일 주식 학습: 금리 5% 근처에서 AI 반도체 랠리 읽기",
+    "일요일 주식 학습: FOMC 이후 AI 주도 장세를 장부처럼 읽기",
   );
   expect(entries[0].href).toBe(
-    "/blog/posts/saturday-market-fed-yields-ai-chip-2026-09-19/",
+    "/blog/posts/sunday-market-fed-ai-ledger-2026-09-20/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });

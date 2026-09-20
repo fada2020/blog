@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /금리 5% 근처/ })
+    .getByRole("link", { name: /FOMC 이후 AI 주도 장세/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/saturday-market-fed-yields-ai-chip-2026-09-19\/$/,
+    /\/blog\/posts\/sunday-market-fed-ai-ledger-2026-09-20\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "토요일 주식 학습: 금리 5% 근처에서 AI 반도체 랠리 읽기",
+    "일요일 주식 학습: FOMC 이후 AI 주도 장세를 장부처럼 읽기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "미국 기준금리, 10년물 금리, 달러 원 환율, AI 반도체, KOSPI가 연결된 무텍스트 시장 리스크 지도",
+    "FOMC 금리 인상, 10년물 금리, 유가, Nasdaq, 한국 반도체가 손익 장부처럼 나뉜 무텍스트 시장 인사이트 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /금리 5% 근처/,
+      name: /FOMC 이후 AI 주도 장세/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /annotation target/,
+      name: /SSRF 방어/,
     }),
   ).toBeVisible();
 });
