@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /FOMC 이후 AI 주도 장세/ })
+    .getByRole("link", { name: /대출 상환과 투자/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/sunday-market-fed-ai-ledger-2026-09-20\/$/,
+    /\/blog\/posts\/monday-money-debt-repay-invest-2026-09-21\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "일요일 주식 학습: FOMC 이후 AI 주도 장세를 장부처럼 읽기",
+    "월요일 경제 기초: 대출 상환과 투자 사이의 확정 수익률 계산하기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "FOMC 금리 인상, 10년물 금리, 유가, Nasdaq, 한국 반도체가 손익 장부처럼 나뉜 무텍스트 시장 인사이트 다이어그램",
+    "대출 상환 경로와 투자 경로가 현금흐름, 금리, 물가, 성장 그래프로 갈라지는 무텍스트 개인 재무 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /FOMC 이후 AI 주도 장세/,
+      name: /대출 상환과 투자/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /SSRF 방어/,
+      name: /성능 프로파일링/,
     }),
   ).toBeVisible();
 });
@@ -150,7 +150,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("학습 글");
   await expect(
     page.getByRole("link", {
-      name: /Spring Boot 개발자를 위한 Kotlin 열셋째 걸음/,
+      name: /Spring Boot 개발자를 위한 Flutter 열넷째 걸음/,
     }),
   ).toBeVisible();
 

@@ -1,0 +1,206 @@
+---
+title: "Spring Boot 개발자를 위한 Flutter 열넷째 걸음: 성능 프로파일링으로 느린 프레임 찾기"
+description: "APM과 slow query 분석에 익숙한 Spring Boot 개발자 관점에서 Flutter DevTools Performance view, CPU profiler, UI thread와 raster thread를 읽는 법을 정리합니다."
+publishedAt: 2026-09-21T09:03:00+09:00
+draft: false
+category: "Frontend"
+tags: ["Flutter", "Dart", "Spring Boot", "Performance", "DevTools"]
+kind: "learning"
+heroImage: "../../assets/blog/flutter-performance-profiling-2026-09-21/cover.webp"
+heroImageAlt: "모바일 앱 화면, 프레임 타이밍 막대, CPU 샘플, flame chart가 연결된 무텍스트 Flutter 성능 프로파일링 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 모바일 앱 학습"
+lesson: 14
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 9월 21일 09시 KST 기준으로 Flutter 공식 DevTools Performance view, CPU profiler,
+> rendering performance 문서를 확인했습니다. Flutter 공식 문서는 별도 표시가 없으면 Flutter 3.47.2를
+> 기준으로 한다고 안내합니다. 이 글은 profile build에서 측정한다는 공식 권장과 DevTools의 안정 기능을 기준으로 하며,
+> beta/dev/main channel 기능을 안정 기능처럼 다루지 않았습니다.
+
+## 결론부터 말하면
+
+Flutter 성능 문제는 "어느 widget이 문제 같다"는 감으로 시작하면 오래 걸립니다. Spring Boot에서 응답 지연을 볼 때
+controller 이름만 보고 추측하지 않고 trace, slow query, CPU profile을 확인하는 것과 같습니다.
+
+Flutter에서는 먼저 **느린 프레임이 UI thread 문제인지, raster thread 문제인지**를 나눠 봐야 합니다. 그다음
+Performance view에서 frame timeline을 보고, CPU profiler에서 비싼 Dart method를 찾아야 합니다. 디버그 빌드에서
+느리다고 바로 결론 내리면 안 됩니다. 공식 문서는 profile build에서 성능을 분석하라고 안내합니다.
+
+## 이번 주 개념
+
+Flutter 공식 Performance view 문서는 Flutter가 60fps 기기에서 약 16ms 안에 한 프레임을 그려야 부드럽게 보인다고
+설명합니다. 120Hz 기기에서는 여유가 더 줄어듭니다. 느린 프레임은 보통 두 갈래입니다.
+
+| 구분 | 하는 일 | Spring Boot에 비유하면 |
+|---|---|---|
+| UI thread | Dart code 실행, widget build, layer tree 생성 | request handler와 service code |
+| Raster thread | layer tree를 GPU가 그릴 수 있게 rendering | DB, network 뒤의 실제 IO 비용처럼 겉에서 늦게 보이는 단계 |
+| CPU profiler | Dart call stack sample을 모아 비싼 method를 찾음 | async-profiler, JFR flame graph |
+| Timeline events | build, layout, paint, HTTP timing, GC 같은 event를 시간순으로 봄 | distributed trace span |
+
+<Mermaid title="Flutter 성능 프로파일링 흐름">
+{`flowchart TD
+  Symptom["사용자가 느낀 버벅임"] --> Profile["profile mode로 재현"]
+  Profile --> Frame["Performance view 프레임 차트"]
+  Frame --> UI["UI thread 지연"]
+  Frame --> Raster["Raster thread 지연"]
+  UI --> CPU["CPU profiler: self time과 call tree"]
+  UI --> Build["widget rebuild, layout 추적"]
+  Raster --> Paint["opacity, clip, shadow, saveLayer 점검"]
+  CPU --> Fix["작은 수정"]
+  Build --> Fix
+  Paint --> Fix
+  Fix --> Measure["같은 시나리오 재측정"]
+`}
+</Mermaid>
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Spring Boot API가 느리면 보통 이런 순서로 봅니다.
+
+```java
+@GetMapping("/orders/{id}")
+OrderResponse findOrder(@PathVariable long id) {
+    return orderService.findOrder(id);
+}
+```
+
+겉으로는 controller 하나지만, 실제 병목은 JPA N+1 query, 외부 API 호출, JSON 직렬화, lock 경합일 수 있습니다.
+그래서 trace로 구간을 쪼개고, metric으로 빈도를 보고, profiler로 CPU를 확인합니다.
+
+Flutter도 같습니다. `build()`가 느린지, layout이 반복되는지, image decoding이나 clip/shadow가 raster thread를
+막는지 나눠야 합니다. "setState가 많아서 느리다"는 말은 "서버가 느리다"만큼 넓은 표현입니다.
+
+## Flutter에서는 무엇이 다른가
+
+서버는 요청 하나가 늦어도 사용자가 다음 요청을 기다릴 수 있습니다. 화면은 다릅니다. 스크롤이나 애니메이션 중 한 프레임이
+16ms를 넘으면 바로 끊겨 보입니다.
+
+Flutter DevTools Performance view는 frame chart에서 UI와 raster 작업을 나눠 보여 줍니다. 공식 문서는 jank frame을
+느린 프레임으로 표시하고, Frame analysis와 Timeline events로 원인을 좁히라고 안내합니다. CPU profiler는 Dart VM이
+수집한 CPU sample을 bottom-up, call tree, method table, flame chart로 보여 줍니다.
+
+중요한 차이는 측정 환경입니다. debug mode는 assert, service extension, hot reload 편의 기능 때문에 release 성능과
+다릅니다. 성능 판단은 profile mode에서 같은 시나리오를 반복해 비교해야 합니다.
+
+## 대응 개념 비교
+
+| Spring Boot 성능 분석 | Flutter 성능 분석 | 확인할 질문 |
+|---|---|---|
+| APM trace | Performance view timeline | 느린 구간이 build, layout, paint 중 어디인가 |
+| async-profiler, JFR | CPU profiler flame chart | self time이 높은 Dart method는 무엇인가 |
+| slow query | expensive widget rebuild | 필요 없는 재계산이 매 frame 반복되는가 |
+| thread pool saturation | UI thread blocking | main isolate에서 큰 계산을 하고 있는가 |
+| serialization cost | raster thread cost | opacity, clip, shadow, image 처리가 과한가 |
+
+Spring Boot에서 "측정 없이 cache부터 넣기"가 위험하듯, Flutter에서도 측정 없이 `const`만 붙이거나 state 관리 도구를
+바꾸는 것은 위험합니다. 먼저 느린 프레임을 재현하고, 바꾼 뒤 같은 시나리오로 다시 재야 합니다.
+
+## 최소 실행 예제: 느린 계산을 화면 밖으로 밀어냅니다
+
+아래 코드는 예시를 위해 일부러 widget build 안에서 비싼 계산을 합니다.
+
+```dart
+class ReportScreen extends StatelessWidget {
+  const ReportScreen({super.key, required this.orders});
+
+  final List<Order> orders;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = orders.fold<int>(
+      0,
+      (sum, order) => sum + expensiveScore(order),
+    );
+
+    return Text('score: $total');
+  }
+}
+```
+
+작은 목록에서는 괜찮아 보입니다. 하지만 scroll, filter, animation과 함께 rebuild가 반복되면 CPU profiler의 self time에
+`expensiveScore`가 보일 수 있습니다. 이때 첫 번째 수정은 거대한 구조 변경이 아니라 계산 위치를 옮기는 것입니다.
+
+```dart
+class ReportSummary {
+  const ReportSummary({required this.score});
+
+  factory ReportSummary.fromOrders(List<Order> orders) {
+    return ReportSummary(
+      score: orders.fold<int>(0, (sum, order) => sum + expensiveScore(order)),
+    );
+  }
+
+  final int score;
+}
+
+class ReportScreen extends StatelessWidget {
+  const ReportScreen({super.key, required this.summary});
+
+  final ReportSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text('score: ${summary.score}');
+  }
+}
+```
+
+서버에서 controller가 매번 통계 쿼리를 직접 조립하지 않고 service나 read model에 맡기는 감각과 비슷합니다. 화면은
+이미 계산된 상태를 표시하고, 계산은 repository, view model, isolate, backend API 중 맞는 곳으로 옮깁니다.
+
+## DevTools에서 보는 순서
+
+먼저 profile mode로 앱을 실행합니다.
+
+```bash
+flutter run --profile
+```
+
+그다음 DevTools Performance view에서 같은 동작을 반복합니다. 예를 들어 "주문 목록 진입 -> 필터 변경 -> 상세 이동"처럼
+짧은 시나리오를 고정합니다.
+
+| 단계 | 볼 곳 | 판단 |
+|---|---|---|
+| 1 | Flutter frames chart | 느린 프레임이 실제로 있는지 확인합니다. |
+| 2 | UI/Raster 막대 | Dart code 쪽인지 rendering 쪽인지 나눕니다. |
+| 3 | Frame analysis | DevTools가 알려 주는 비싼 작업 힌트를 봅니다. |
+| 4 | Timeline events | build, layout, paint, GC, HTTP timing을 시간순으로 봅니다. |
+| 5 | CPU profiler | self time과 call tree로 method 단위 병목을 찾습니다. |
+
+CPU profiler의 bottom-up view는 "어떤 method가 꼭대기에서 CPU를 많이 먹었는가"를 보기 좋습니다. call tree는 "어떤 호출
+경로로 비싼 method에 도달했는가"를 보기 좋습니다. flame chart는 긴 흐름을 눈으로 찾기 좋습니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫 번째 오해는 "디버그에서 느리면 사용자가 느릴 것이다"입니다. 디버그 빌드는 개발 편의를 위한 모드입니다. 공식 문서도
+profile build에서 성능을 분석하라고 말합니다.
+
+두 번째 오해는 "widget 수가 많으면 무조건 느리다"입니다. Flutter는 widget을 빠르게 만들고 버리도록 설계되어 있습니다.
+문제는 보통 필요 이상으로 큰 영역을 매 frame rebuild하거나, 큰 list를 한 번에 만들거나, raster thread에 비싼 효과를
+몰아넣을 때 생깁니다.
+
+세 번째 오해는 "CPU profiler만 보면 된다"입니다. CPU profiler는 Dart code에 강합니다. raster thread가 느린 경우에는
+opacity, clip, shadow, saveLayer, image 처리처럼 rendering 비용을 Performance view와 rendering 관련 도구로 함께 봐야
+합니다.
+
+## 연습 문제
+
+1. 기존 Flutter 화면 하나를 골라 `flutter run --profile`로 같은 동작을 세 번 반복해 봅니다.
+2. DevTools Performance view에서 가장 느린 frame을 하나 고르고 UI와 raster 중 어디가 더 긴지 적습니다.
+3. CPU profiler bottom-up view에서 self time이 높은 application method 하나를 찾습니다.
+4. 그 method가 `build()` 중 반복되는지, view model에서 한 번 계산해도 되는지 판단합니다.
+5. 수정 후 같은 시나리오를 다시 측정하고 frame chart screenshot 또는 export snapshot을 보관합니다.
+
+## 참고자료
+
+- [Flutter Docs - Use the Performance view](https://docs.flutter.dev/tools/devtools/performance)
+- [Flutter Docs - Use the CPU profiler view](https://docs.flutter.dev/tools/devtools/cpu-profiler)
+- [Flutter Docs - Improving rendering performance](https://docs.flutter.dev/perf/rendering-performance)
+- [Flutter Docs](https://docs.flutter.dev/)
