@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /대출 상환과 투자/ })
+    .getByRole("link", { name: /에이전트 API, Node 런타임/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/monday-money-debt-repay-invest-2026-09-21\/$/,
+    /\/blog\/posts\/weekly-it-trends-2026-09-22\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "월요일 경제 기초: 대출 상환과 투자 사이의 확정 수익률 계산하기",
+    "2026년 9월 넷째 주 IT 기술동향: 에이전트 API, Node 런타임, AI Gateway, 빌드 증적",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "대출 상환 경로와 투자 경로가 현금흐름, 금리, 물가, 성장 그래프로 갈라지는 무텍스트 개인 재무 다이어그램",
+    "에이전트 오케스트레이션, JavaScript 런타임, AI 게이트웨이 라우팅, 컨테이너 빌드 증적 패널이 연결된 무텍스트 기술 동향 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /대출 상환과 투자/,
+      name: /에이전트 API, Node 런타임/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /성능 프로파일링/,
+      name: /Memory view로 누수/,
     }),
   ).toBeVisible();
 });
@@ -150,7 +150,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("학습 글");
   await expect(
     page.getByRole("link", {
-      name: /Spring Boot 개발자를 위한 Flutter 열넷째 걸음/,
+      name: /Spring Boot 개발자를 위한 Flutter 열다섯째 걸음/,
     }),
   ).toBeVisible();
 

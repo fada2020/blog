@@ -1,0 +1,186 @@
+---
+title: "2026년 9월 넷째 주 IT 기술동향: 에이전트 API, Node 런타임, AI Gateway, 빌드 증적"
+description: "2026년 9월 16일부터 9월 22일까지 공식 발표된 OpenAI Agents API, Node.js 26.9.0, Vercel AI Gateway, Docker Build Cloud 변화를 Spring Boot 팀 관점에서 정리합니다."
+publishedAt: 2026-09-22T09:07:00+09:00
+draft: false
+category: "Tooling"
+tags: ["Tech Trends", "AI Agent", "Node.js", "Vercel", "Docker"]
+kind: "trend"
+heroImage: "../../assets/blog/weekly-it-trends-2026-09-22/cover.webp"
+heroImageAlt: "에이전트 오케스트레이션, JavaScript 런타임, AI 게이트웨이 라우팅, 컨테이너 빌드 증적 패널이 연결된 무텍스트 기술 동향 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 범위**
+>
+> 2026년 9월 22일 09시 KST에 공식 블로그, 공식 릴리스 노트와 공식 문서를 확인했습니다.
+> 범위는 2026년 9월 16일부터 2026년 9월 22일까지 공개된 공식 발표입니다. 기준 상태는 OpenAI
+> Agents API public beta, Node.js 26.9.0 Current, Vercel AI Gateway의 GLM 5.3 FlashX 지원,
+> Docker Build Cloud 2026-09-14 release notes입니다. preview, beta, experimental 항목은 stable 기능처럼
+> 설명하지 않았고, beta/experimental 표기는 본문에 따로 남겼습니다.
+
+## 결론부터 말하면
+
+이번 주 동향은 **agent 실행 인프라가 API 상품으로 내려오고, runtime과 build pipeline은 측정 가능성과 증적을 더
+강하게 요구하는 방향**입니다.
+
+OpenAI는 Codex 계열 harness를 개발자가 쓸 수 있는 Agents API public beta로 공개했습니다. Node.js 26.9.0 Current는
+`node:bench`, Web Workers, VFS loader, crypto/provider discovery 같은 런타임 실험 축을 넓혔습니다. Vercel은 AI
+Gateway에 GLM 5.3 FlashX를 추가해 model routing과 request trace 흐름을 강화했고, Docker Build Cloud는 BuildKit
+0.33.0으로 SBOM attestation 한도와 credential redaction을 개선했습니다.
+
+Spring Boot 팀이 볼 지점은 "새 AI 도구가 하나 더 나왔다"가 아니라, **agent 실행 환경, JavaScript sidecar runtime,
+모델 라우팅, container build 증적을 운영 계약으로 어떻게 기록할 것인가**입니다.
+
+## 이번 주에 확인한 큰 흐름
+
+| 영역 | 공식 발표 | Spring Boot 팀이 볼 지점 |
+|---|---|---|
+| Agent 플랫폼 | OpenAI Agents API public beta | 장시간 agent 실행, sandbox, subagent, MCP tool 권한을 설계 대상으로 봅니다. |
+| JavaScript 런타임 | Node.js 26.9.0 Current | Current와 LTS를 구분하고, 실험 API를 운영 기준으로 착각하지 않습니다. |
+| AI 모델 라우팅 | Vercel AI Gateway GLM 5.3 FlashX | 모델 fallback, request trace, 비용 관측을 gateway layer로 옮깁니다. |
+| 빌드 증적 | Docker Build Cloud BuildKit 0.33.0 | SBOM 크기, Dockerfile frontend, credential redaction을 CI 증적으로 봅니다. |
+
+직전 기술동향 글은 GitHub Copilot 운영지표, Copilot code review, Cloudflare Workers, Kubernetes scheduling을 다뤘습니다.
+이번 글에서는 같은 GitHub/Cloudflare/Kubernetes 축을 반복하지 않고, OpenAI, Node.js, Vercel, Docker로 범위를 옮겼습니다.
+
+<Mermaid title="2026년 9월 넷째 주 기술 동향 흐름">
+{`flowchart LR
+  Official["공식 발표<br/>2026-09-16 ~ 2026-09-22"] --> Agents["Agent 실행 API"]
+  Official --> Runtime["Node.js runtime"]
+  Official --> Gateway["AI Gateway"]
+  Official --> Build["Build evidence"]
+
+  Agents --> Ops["운영 계약"]
+  Runtime --> Ops
+  Gateway --> Ops
+  Build --> Ops
+
+  Ops --> Isolation["격리"]
+  Ops --> Observability["관측"]
+  Ops --> SupplyChain["공급망 증적"]
+`}
+</Mermaid>
+
+## 1. OpenAI Agents API는 agent harness를 제품 경계로 끌어냈습니다
+
+OpenAI는 2026년 9월 10일 Agents API를 public beta로 공개했습니다. 발표는 Codex와 ChatGPT Work에서 쓰는 장시간
+agent harness, tool 사용, subagent coordination, managed sandbox를 API로 제공한다는 방향을 설명합니다.
+
+중요한 점은 모델 호출 API 하나가 아니라 agent 실행 환경까지 포함한다는 점입니다. 공식 발표는 OpenAI hosted sandbox,
+MCP와 custom function, built-in web search, tool search, programmatic tool calling, multi-agent support를 함께
+언급합니다. 다만 public beta이므로 운영 표준으로 채택할 때는 변경 가능성과 제한을 따로 기록해야 합니다.
+
+Spring Boot 팀이 내부 운영 자동화나 코드 분석 agent를 붙인다면 다음 경계를 먼저 정해야 합니다.
+
+- agent가 접근할 repository, ticket, log, secret 범위
+- hosted sandbox와 자체 infrastructure 중 어느 쪽을 쓸지
+- subagent 병렬 실행이 만드는 비용과 권한 확산
+- agent가 남길 evidence file, command log, 실패 원인
+- 사람이 승인해야 하는 변경과 자동화해도 되는 변경
+
+agent는 이제 "채팅창에서 도움받기"보다 더 넓은 배포 단위가 되고 있습니다. 그래서 API key 하나보다 실행 환경과 권한
+모델이 더 중요합니다.
+
+## 2. Node.js 26.9.0 Current는 런타임 실험 축을 넓혔습니다
+
+Node.js는 2026년 9월 16일 26.9.0 Current를 공개했습니다. notable changes에는 generic MAC API, OpenSSL provider 기반
+cipher/hash discovery, FFI module 기본 활성화, `node:bench`, perf_hooks histogram 개선, experimental DTLS API,
+VFS loader 통합, Web Workers 지원이 포함됐습니다.
+
+여기서 첫 번째 운영 판단은 **Current와 LTS를 분리하는 것**입니다. Spring Boot 서비스가 직접 Node.js를 주 런타임으로
+쓰지 않아도, frontend build, SSR sidecar, internal CLI, Playwright, design system build에는 Node.js가 들어갑니다.
+Current release의 기능을 보고 바로 CI 기준을 올리면 LTS 정책과 충돌할 수 있습니다.
+
+| Node.js 26.9.0 항목 | 의미 | 운영 판단 |
+|---|---|---|
+| `node:bench` | runtime 내 benchmark API | 성능 회귀 측정 후보지만 release maturity 확인이 필요합니다. |
+| Web Workers | browser와 비슷한 worker model 확대 | tool/sidecar code의 병렬 실행 모델을 검토할 수 있습니다. |
+| VFS loader | CJS/ESM loader와 virtual file system 통합 | single executable, packaged tool 흐름과 연결됩니다. |
+| crypto provider discovery | OpenSSL provider 기반 algorithm discovery | FIPS, custom provider 환경에서는 검증 케이스가 필요합니다. |
+| experimental DTLS API | datagram TLS 실험 API | 운영 보안 경계로 쓰기 전 experimental 상태를 확인해야 합니다. |
+
+Java 팀에는 "Node는 frontend 빌드 도구"라는 인식이 남아 있기 쉽습니다. 하지만 build, test, browser automation,
+edge runtime, agent tool이 Node 위에서 돌면 runtime policy도 backend 운영 문서에 들어가야 합니다.
+
+## 3. Vercel AI Gateway는 모델 선택을 application code 밖으로 밀고 있습니다
+
+Vercel은 2026년 9월 17일 AI Gateway에서 Z.ai의 GLM 5.3 FlashX를 사용할 수 있다고 공지했습니다. 발표는 하나의 API key,
+automatic fallback, spend tracking, request trace, 빠른 token throughput을 강조합니다.
+
+이 변화는 특정 모델 하나보다 gateway layer의 의미가 더 큽니다. 애플리케이션 코드가 모델 vendor별 endpoint와 retry,
+fallback, 비용 집계를 직접 들고 있으면 변경이 어려워집니다. Gateway를 쓰면 요청 추적, 비용 제한, fallback 정책을
+한 곳에서 관리할 수 있습니다.
+
+Spring Boot에서 외부 결제 PG, SMS provider, storage provider를 adapter 뒤에 숨기는 것과 비슷합니다. LLM도 이제
+`model = "x"` 한 줄이 아니라 routing policy입니다.
+
+```java
+interface ModelGateway {
+    ModelAnswer ask(ModelRequest request);
+}
+```
+
+위 interface 뒤에 provider별 client를 숨기는 것만으로는 부족합니다. 실제 운영에서는 다음 metadata가 같이 남아야 합니다.
+
+- 선택된 model과 fallback 여부
+- input/output token과 비용
+- latency와 timeout
+- safety 또는 policy reject 여부
+- request trace id와 사용자-facing 결과의 연결
+
+AI Gateway 계층은 개발 속도를 올리지만, 장애 때 "어떤 모델이 실제로 답했는가"를 모르면 디버깅이 어려워집니다.
+
+## 4. Docker Build Cloud는 SBOM과 credential 노출 경계를 다듬었습니다
+
+Docker Build Cloud 2026-09-14 release notes는 cloud builder가 BuildKit v0.33.0으로 올라갔다고 설명합니다. 눈에 띄는
+변화는 exported attestation, 예를 들어 SBOM의 최대 크기가 40 MiB에서 80 MiB로 늘어난 점입니다. Dockerfile frontend는
+v1.27.0으로 올라갔고, HTTP source URL과 Git bundle checkout에 들어간 credential이 build progress와 error message에서
+더 많이 redaction됩니다.
+
+이것은 화려한 기능보다 실무적인 공급망 변화입니다. 대형 monorepo나 dependency가 많은 image는 SBOM이 커질 수 있고,
+이전 한도에서는 `sbom.spdx.json exceeds 41943040 bytes` 같은 오류로 실패할 수 있었습니다. 또한 build log에 credential이
+새어 나가지 않는 것은 CI 보안의 기본 계약입니다.
+
+Spring Boot image build에서도 다음을 확인해야 합니다.
+
+- SBOM attestation을 만들고 실제 registry나 verifier가 받아들이는가
+- Dockerfile frontend를 `# syntax=`로 pin할지, builder 기본값을 따를지
+- remote cache와 concurrent build에서 실패가 재현되는가
+- build secret을 URL credential로 넘기고 있지 않은가
+- build log를 외부 ticket이나 chat으로 공유해도 되는 수준으로 redaction되는가
+
+Build Cloud를 쓰지 않더라도 BuildKit과 Buildx 버전 차이는 CI 결과에 영향을 줍니다. "내 laptop에서는 된다"보다 "어떤
+builder와 frontend로 만들었는가"를 남기는 편이 좋습니다.
+
+## 본문에 넣지 않은 후보와 제외 이유
+
+- GitHub Copilot 관련 9월 16~21일 발표는 많았지만, 직전 기술동향 글에서 GitHub Copilot과 code review를 깊게 다뤄
+  이번 회차에서는 반복을 피했습니다.
+- Cloudflare Workers AI의 `rejectIfBusy`와 Browser Run Session Recordings는 실무 가치가 있지만, 직전 글에서 Cloudflare
+  Workers와 Miniflare를 다뤘기 때문에 메인 축에서 제외했습니다.
+- Kubernetes v1.37 storage security와 Memory QoS 글은 중요하지만, 직전 글에서 Kubernetes scheduling을 다뤘고 같은
+  release series 반복이 되어 제외했습니다.
+- Docker Desktop 4.91.0은 Docker Engine, containerd, Compose, Buildx 업데이트를 묶어 확인했지만, 이번 글에서는
+  CI/CD 증적과 직접 연결되는 Docker Build Cloud release note를 우선했습니다.
+
+## 실무 체크리스트
+
+- [ ] agent API를 도입하기 전에 sandbox, tool, secret, file access 경계를 먼저 문서화한다.
+- [ ] agent 실행 결과에는 command, evidence, 실패 이유, 사람이 승인한 변경을 남긴다.
+- [ ] Node.js Current 기능을 CI 표준으로 쓰기 전에 LTS 정책과 toolchain 지원 범위를 확인한다.
+- [ ] LLM 호출은 provider client가 아니라 gateway/routing/trace 계약으로 설계한다.
+- [ ] model fallback이 사용자 결과와 비용 집계에 어떻게 남는지 확인한다.
+- [ ] container build에는 builder version, Dockerfile frontend, SBOM attestation, redaction 정책을 기록한다.
+- [ ] 실험/베타 기능은 운영 기본값이 아니라 별도 flag와 rollback plan으로 다룬다.
+
+## 참고자료
+
+- [OpenAI - Introducing the Agents API](https://openai.com/index/introducing-the-agents-api/)
+- [Node.js - Node.js 26.9.0 (Current)](https://nodejs.org/en/blog/release/v26.9.0)
+- [Vercel Changelog - GLM 5.3 FlashX now available on AI Gateway](https://vercel.com/changelog/glm-5-3-flashx-now-available-on-ai-gateway)
+- [Docker Docs - Docker Build Cloud release notes](https://docs.docker.com/build-cloud/release-notes/)
+- [Docker Docs - Docker Desktop release notes](https://docs.docker.com/desktop/release-notes/)
