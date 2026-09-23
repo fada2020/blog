@@ -1,0 +1,212 @@
+---
+title: "Spring Boot 개발자를 위한 Flutter 열여섯째 걸음: 오류 수집과 크래시 리포팅 경계 나누기"
+description: "Spring Boot의 exception handler와 관측성 감각을 Flutter에 옮겨, FlutterError, PlatformDispatcher, zone, Crashlytics/Sentry 경계를 나눕니다."
+publishedAt: 2026-09-23T09:03:00+09:00
+draft: false
+category: "Frontend"
+tags: ["Flutter", "Dart", "Spring Boot", "Error Handling", "Crash Reporting"]
+kind: "learning"
+heroImage: "../../assets/blog/flutter-error-reporting-boundary-2026-09-23/cover.webp"
+heroImageAlt: "모바일 앱 오류, Flutter framework handler, platform dispatcher, zone, crash reporting 대시보드가 연결된 무텍스트 오류 수집 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 모바일 앱 학습"
+lesson: 16
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 9월 23일 09시 KST 기준으로 Flutter SDK archive JSON, Flutter 오류 처리 문서,
+> Dart zone 문서, Firebase Crashlytics Flutter 문서, Sentry Flutter package 문서를 확인했습니다.
+> SDK archive의 stable channel은 Flutter 3.47.5, Dart 3.13.4를 가리켰습니다. 이 글은 stable channel과
+> 공식 문서의 안정 기능을 기준으로 하며, preview/beta/dev channel 기능을 안정 기능처럼 다루지 않았습니다.
+
+## 결론부터 말하면
+
+Flutter 앱의 오류 수집은 `try-catch` 하나로 끝나지 않습니다. Spring Boot에서 `@ControllerAdvice`, logging filter,
+APM, uncaught exception handler, batch listener를 나눠 보듯이 Flutter도 **framework callback 오류, 비동기 오류,
+isolate 오류, 사용자가 처리한 non-fatal 오류**를 나눠야 합니다.
+
+지난 글에서 Memory view로 누수와 메모리 팽창을 구분했다면, 이번에는 운영에서 실제로 먼저 보게 되는 crash와
+non-fatal 오류를 어디서 잡고 어디까지 보내야 하는지 정리합니다.
+
+## 이번 주 개념
+
+Flutter 공식 오류 처리 문서는 Flutter framework가 build, layout, paint 같은 framework callback 중 발생한 오류를
+`FlutterError.onError`로 보낸다고 설명합니다. 반대로 Flutter callback 바깥에서 생긴 오류는 framework가 잡지 못하므로
+`PlatformDispatcher.instance.onError` 같은 경계를 따로 둬야 합니다.
+
+| 오류 경계 | 잡는 오류 | Spring Boot에 비유하면 |
+|---|---|---|
+| `FlutterError.onError` | build/layout/paint 등 Flutter framework callback 오류 | MVC exception resolver |
+| `PlatformDispatcher.<wbr/>instance.<wbr/>onError` | framework 바깥의 uncaught async/platform 오류 | JVM uncaught exception handler |
+| `runZonedGuarded` | 같은 zone 안의 uncaught async 오류 | 요청 context를 품은 실행 경계 |
+| 명시적 `try-catch` | 복구 가능한 domain/API 오류 | service-level exception mapping |
+| Crashlytics/Sentry | 오류 집계와 릴리스별 추적 | Sentry/APM error tracking |
+
+<Mermaid title="Flutter 오류 수집 경계">
+{`flowchart TD
+  Error["오류 발생"] --> Source{"어디서 발생했나"}
+  Source -->|Framework callback| FlutterError["FlutterError.onError"]
+  Source -->|비동기/플랫폼| Dispatcher["PlatformDispatcher.onError"]
+  Source -->|직접 처리 가능| Catch["try-catch"]
+  Source -->|별도 isolate| Isolate["Isolate error listener"]
+
+  FlutterError --> Reporter["Crash reporter"]
+  Dispatcher --> Reporter
+  Catch --> Reporter
+  Isolate --> Reporter
+  Reporter --> Triage["릴리스, 화면, 사용자 영향 기준 triage"]
+`}
+</Mermaid>
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Spring Boot에서는 모든 예외를 같은 층에서 처리하지 않습니다.
+
+```java
+@RestControllerAdvice
+class ApiExceptionHandler {
+    @ExceptionHandler(IllegalArgumentException.class)
+    ResponseEntity<ErrorResponse> badRequest(IllegalArgumentException error) {
+        return ResponseEntity.badRequest()
+            .body(new ErrorResponse("INVALID_REQUEST"));
+    }
+}
+```
+
+이 코드는 HTTP 응답으로 바꿀 수 있는 오류를 다룹니다. 하지만 worker thread에서 터진 uncaught exception, scheduled
+job 실패, JVM crash, out-of-memory, 네트워크 장애는 다른 경계에서 봐야 합니다. Flutter도 마찬가지입니다. 화면에
+보여 줄 수 있는 오류와 앱이 중단될 수 있는 오류를 섞으면 운영 판단이 흐려집니다.
+
+## Flutter에서는 무엇이 다른가
+
+Flutter는 UI framework, Dart async runtime, platform channel, native layer가 함께 움직입니다. 따라서 "앱에서 오류가
+났다"는 말만으로는 부족합니다.
+
+| 상황 | 권장 처리 |
+|---|---|
+| widget build 중 null 접근 | `FlutterError.onError`에서 기록하고 사용자 화면은 fallback으로 유지 |
+| 버튼의 `async` callback에서 throw | `PlatformDispatcher.onError` 또는 명시적 `try-catch`로 기록 |
+| API 400/404 | crash가 아니라 화면 상태와 domain error로 처리 |
+| 결제/저장 실패 | non-fatal로 기록하고 사용자 재시도 경로 제공 |
+| 별도 isolate 작업 실패 | isolate error listener 또는 SDK 지원 기능 확인 |
+
+Crashlytics 문서는 Flutter framework 오류를 fatal 또는 non-fatal로 기록하려면 `FlutterError.onError`를 override할 수
+있고, framework가 잡지 못하는 asynchronous 오류는 `PlatformDispatcher.instance.onError`로 보낼 수 있다고 안내합니다.
+Sentry Flutter package도 Flutter 3.3 이상에서는 `PlatformDispatcher.onError` 기반 자동 수집 흐름을 설명합니다.
+
+## 대응 개념 비교
+
+| Spring Boot 습관 | Flutter에서의 대응 | 주의점 |
+|---|---|---|
+| 모든 예외를 error log로 남김 | fatal/non-fatal/user-handled를 구분 | 복구 가능한 validation 오류를 crash로 보내지 않습니다. |
+| request id를 MDC에 넣음 | route, screen, release, user segment를 tag/context로 넣음 | 개인 식별 정보는 넣지 않습니다. |
+| controller advice에서 응답 변환 | UI state에서 error view/snackbar로 변환 | crash reporter는 사용자 메시지 대체재가 아닙니다. |
+| APM에서 release별 추적 | Crashlytics/Sentry에서 version별 issue 추적 | debug symbol/source map 업로드 정책을 확인합니다. |
+| batch failure를 별도 모니터링 | isolate/background task 실패를 별도 기록 | main isolate handler가 모든 isolate를 대신하지 않습니다. |
+
+## 최소 실행 예제: main에서 오류 경계를 한 번에 세웁니다
+
+아래 예제는 reporter interface를 두고 Flutter framework 오류와 platform 오류를 같은 저장소로 보냅니다.
+
+```dart
+import 'dart:ui';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+
+abstract class ErrorReporter {
+  Future<void> recordFatal(Object error, StackTrace? stackTrace);
+  Future<void> recordFlutter(FlutterErrorDetails details);
+  Future<void> recordNonFatal(Object error, StackTrace stackTrace);
+}
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final reporter = await createErrorReporter();
+
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    reporter.recordFlutter(details);
+  };
+
+  PlatformDispatcher.instance.onError = (error, stackTrace) {
+    reporter.recordFatal(error, stackTrace);
+    return true;
+  };
+
+  runApp(const MyApp());
+}
+```
+
+핵심은 reporter 구현이 아닙니다. 앱의 entrypoint에서 어떤 오류가 fatal인지, 어떤 오류를 non-fatal로 기록할지, 콘솔
+출력을 보존할지 먼저 정하는 것입니다. Flutter 문서도 custom handler에서 기존 로그를 보려면
+`FlutterError.presentError` 호출을 고려하라고 안내합니다.
+
+## 복구 가능한 오류는 crash가 아닙니다
+
+API가 400을 돌려줬거나 사용자가 네트워크 없는 상태에서 저장을 눌렀다면 그것은 앱 crash가 아닙니다. Spring Boot에서
+validation 실패를 Sentry error로만 쌓으면 운영자가 피로해지듯이, Flutter에서도 사용자에게 안내하고 재시도할 수 있는
+상태는 UI state로 처리해야 합니다.
+
+```dart
+Future<void> submit() async {
+  state = const AsyncValue.loading();
+
+  try {
+    await repository.save(form.toCommand());
+    state = const AsyncValue.data(SaveResult.done);
+  } on ValidationException catch (error) {
+    state = AsyncValue.error(error, StackTrace.current);
+  } catch (error, stackTrace) {
+    await reporter.recordNonFatal(error, stackTrace);
+    state = AsyncValue.error(error, stackTrace);
+  }
+}
+```
+
+사용자에게 보여 줄 메시지, 재시도 버튼, 문의 코드, crash reporter로 보낼 context를 분리하면 이후 triage가 쉬워집니다.
+
+## 수집 전에 개인정보와 cardinality를 줄입니다
+
+Crashlytics 문서는 exception message에 user ID나 timestamp처럼 고유값을 직접 넣지 말고 custom key를 쓰라고 경고합니다.
+오류 수집 도구는 grouping이 생명입니다. 매번 다른 메시지를 보내면 같은 오류가 수천 개 issue로 흩어질 수 있습니다.
+
+| 넣어도 되는 정보 | 피해야 하는 정보 |
+|---|---|
+| app version, build number, route name | 이름, 전화번호, 이메일, 정확한 주소 |
+| feature flag 이름 | access token, refresh token, session id |
+| API error code | 환자/의료/가족 식별 정보 |
+| device class, OS version | raw request/response body 전체 |
+
+Spring Boot에서 log masking과 PII policy를 두듯이 Flutter reporter에도 before-send 또는 filtering 정책을 둬야 합니다.
+
+## 실무 체크리스트
+
+- [ ] `FlutterError.onError`에서 framework 오류를 기록하고 기존 console 출력 보존 여부를 정한다.
+- [ ] `PlatformDispatcher.<wbr/>instance.<wbr/>onError`에서 uncaught async/platform 오류를 기록한다.
+- [ ] recoverable API/domain 오류는 crash가 아니라 UI state로 처리한다.
+- [ ] Crashlytics/Sentry에 보낼 tag와 context에서 개인 식별 정보를 제거한다.
+- [ ] debug symbol/source map 업로드가 필요한 플랫폼과 build mode를 확인한다.
+- [ ] release별 crash-free session, non-fatal 증가, 신규 issue를 배포 체크리스트에 넣는다.
+- [ ] 오류 수집 테스트는 debug가 아니라 profile/release에 가까운 환경에서도 확인한다.
+
+## 연습 문제
+
+1. 앱의 `main()`에서 오류 handler가 어디에 있는지 찾습니다.
+2. framework 오류, async 오류, API 오류, isolate 오류를 각각 어느 경계에서 처리하는지 표로 씁니다.
+3. reporter에 보내는 context에서 개인 식별 정보와 고유 timestamp를 제거합니다.
+4. 의도적으로 non-fatal 오류 하나를 만들고 dashboard에서 같은 issue로 grouping되는지 확인합니다.
+5. 배포 전 checklist에 release version, symbol upload, crash-free metric 확인 항목을 추가합니다.
+
+## 참고자료
+
+- [Flutter Docs - Flutter SDK archive](https://docs.flutter.dev/install/archive)
+- [Flutter release archive JSON - Linux](https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json)
+- [Flutter Docs - Handling errors in Flutter](https://docs.flutter.dev/testing/errors)
+- [Dart Docs - Zones](https://dart.dev/libraries/async/zones)
+- [Firebase Crashlytics - Customize crash reports for Flutter](https://firebase.google.com/docs/crashlytics/flutter/customize-crash-reports)
+- [Sentry Flutter package](https://pub.dev/packages/sentry_flutter)
