@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /sandbox, 비용, PR 흐름/ })
+    .getByRole("link", { name: /배포 값은 한 파일에서 시작/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/ai-agent-sandbox-cost-routing-2026-09-23\/$/,
+    /\/blog\/posts\/env-contract-deployment-retrospective-2026-09-24\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "AI agent 실전 운영: sandbox, 비용, PR 흐름으로 코딩 에이전트 고르기",
+    "환경 설정 회고: 배포 값은 한 파일에서 시작해야 흔들리지 않습니다",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "여러 코딩 에이전트가 로컬 샌드박스, 클라우드 PR, 비용 계량, 감사 로그 경로로 나뉘는 무텍스트 운영 다이어그램",
+    "중앙 환경 설정 파일이 Jenkins, Docker 컨테이너, Next.js 서버, Cloudflare 터널 검증으로 퍼지는 무텍스트 배포 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /sandbox, 비용, PR 흐름/,
+      name: /배포 값은 한 파일에서 시작/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /오류 수집과 크래시 리포팅/,
+      name: /contracts로 smart cast 경계/,
     }),
   ).toBeVisible();
 });
@@ -158,7 +158,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page).toHaveURL(/\/blog\/kinds\/learning\/page\/2\/$/);
   await expect(
     page.getByRole("link", {
-      name: "Spring Boot 개발자를 위한 Flutter 여섯째 걸음: Riverpod으로 앱 상태 나누기",
+      name: "Spring Boot 개발자를 위한 Kotlin 열째 걸음: context parameters는 DI가 아니라 호출 문맥이다",
     }),
   ).toBeVisible();
 });

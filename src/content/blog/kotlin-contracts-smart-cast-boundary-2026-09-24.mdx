@@ -1,0 +1,271 @@
+---
+title: "Spring Boot 개발자를 위한 Kotlin 열넷째 걸음: contracts로 smart cast 경계 읽기"
+description: "Java assert와 Bean Validation에 익숙한 개발자를 위해 Kotlin contract가 컴파일러의 흐름 분석을 어떻게 돕고, 서버 코드에서 어디까지 써도 되는지 정리합니다."
+publishedAt: 2026-09-24T08:50:00+09:00
+draft: false
+category: "Backend"
+tags: ["Kotlin", "Contracts", "Smart Cast", "Spring Boot", "Java Interop"]
+kind: "learning"
+heroImage: "../../assets/blog/kotlin-contracts-smart-cast-boundary-2026-09-24/cover.webp"
+heroImageAlt: "Kotlin contract가 validation helper, smart cast, service boundary로 이어지는 무텍스트 백엔드 학습 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 Kotlin 학습"
+lesson: 14
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 9월 24일에 Kotlin release process, Kotlin 2.4.20 릴리스 노트, type checks and casts 문서,
+> contracts 표준 API와 inline functions 문서를 확인했습니다. 기준 안정 버전은 `Kotlin 2.4.20`입니다.
+> Kotlin 공식 문서는 사용자 정의 contract 선언 API에 `ExperimentalContracts` opt-in이 필요하다고 표시합니다.
+> 따라서 이 글은 표준 라이브러리와 제한적인 내부 helper를 읽는 관점으로 다루고, 일반 서비스 검증 로직을 contract로
+> 옮기라고 권하지 않습니다.
+
+## 결론부터 말하면
+
+Kotlin contract는 런타임 검증 기능이 아니라 **컴파일러에게 함수의 호출 효과를 알려 주는 힌트**입니다. Spring Boot
+개발자에게는 Bean Validation, `Assert.notNull`, `require`, `check`와 비슷해 보일 수 있지만 역할이 다릅니다.
+
+- Bean Validation은 요청 데이터가 들어온 뒤 runtime에서 검증합니다.
+- `require`와 `check`는 조건이 틀리면 exception을 던집니다.
+- smart cast는 컴파일러가 안전하다고 판단한 타입 정보를 코드 안에서 유지합니다.
+- contract는 함수가 반환됐을 때 어떤 조건이 참인지, lambda가 몇 번 호출되는지 같은 정보를 컴파일러에게 설명합니다.
+- 사용자 정의 contract는 아직 opt-in이 필요한 API이므로 public business API의 기본 도구로 쓰면 안 됩니다.
+
+서버 코드의 기본값은 여전히 명시적인 타입, 명시적인 예외, 명시적인 command 변환입니다. Contract는 이 기본값을 대체하는
+기능이 아니라, 검증 helper를 너무 많이 감쌌을 때 smart cast 정보가 끊기는 지점을 이해하는 도구입니다.
+
+## 이번 주 개념
+
+Kotlin smart cast는 `is`, `!is`, null check, control flow를 보고 타입을 좁힙니다.
+
+```kotlin
+fun lengthOf(value: Any?): Int {
+    if (value !is String) return 0
+
+    return value.length
+}
+```
+
+`value !is String`이면 바로 반환하므로, 그 아래에서 `value`는 `String`으로 취급됩니다. Java에서는 보통 pattern matching
+또는 명시 cast를 떠올릴 수 있습니다. Kotlin은 이 흐름을 더 넓게 추적합니다.
+
+문제는 검증을 함수로 빼는 순간 생깁니다.
+
+```kotlin
+fun isPresent(value: String?): Boolean = value != null
+
+fun normalize(value: String?): String {
+    if (!isPresent(value)) return "anonymous"
+
+    return value.trim()
+}
+```
+
+사람은 `isPresent(value)`가 `value != null`이라는 뜻을 압니다. 하지만 컴파일러는 일반 함수가 어떤 조건을 보장하는지
+자동으로 알 수 없습니다. 이때 contract는 "이 함수가 true를 반환하면 인자가 null이 아니다" 같은 관계를 선언하는 방법입니다.
+
+<Mermaid title="Kotlin contract와 smart cast 흐름">
+{`flowchart LR
+  Input["Nullable input"] --> Check["Validation helper"]
+  Check -->|without contract| Unknown["Compiler keeps nullable type"]
+  Check -->|with contract| Narrow["Compiler narrows type"]
+  Narrow --> Boundary["Service command boundary"]
+  Unknown --> Explicit["Use explicit require or local val"]
+`}
+</Mermaid>
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Java와 Spring에서는 검증과 타입 좁히기가 대부분 분리됩니다.
+
+```java
+String normalize(String value) {
+    Assert.hasText(value, "value must not be blank");
+    return value.trim();
+}
+```
+
+이 코드는 runtime에서는 잘 동작합니다. 하지만 Java 컴파일러가 `Assert.hasText()` 호출 이후 `value`의 nullability를 더
+정교하게 추적하는 것은 아닙니다. 보통은 annotation, IDE 분석, test, runtime exception이 함께 경계를 지킵니다.
+
+Spring Boot 요청 경계도 비슷합니다.
+
+```kotlin
+data class CreateUserRequest(
+    @field:NotBlank val email: String?,
+)
+```
+
+Bean Validation은 controller 진입 뒤 요청을 검증합니다. 하지만 서비스 안에서는 nullable 타입을 non-null처럼 바꿔 주지
+않습니다. 그래서 Kotlin 서버 코드는 validation DTO와 내부 command를 분리하는 편이 읽기 쉽습니다.
+
+```kotlin
+data class CreateUserCommand(
+    val email: String,
+)
+
+fun CreateUserRequest.toCommand(): CreateUserCommand =
+    CreateUserCommand(email = requireNotNull(email).trim())
+```
+
+이렇게 변환하면 내부 service는 `String?`가 아니라 `String`을 받습니다. Contract가 없어도 경계가 분명합니다.
+
+## Kotlin에서는 무엇이 다른가
+
+Kotlin 표준 라이브러리에는 이미 contract를 이용한 함수가 있습니다. 대표적으로 `run`, `let`, `also`, `apply` 같은 inline
+함수는 lambda가 호출되는 방식에 대한 정보를 컴파일러가 더 잘 이해할 수 있습니다. Kotlin 문서는 inline 함수와 smart cast,
+control flow 분석의 관계를 함께 설명합니다.
+
+사용자 정의 contract의 모양은 아래와 같습니다.
+
+```kotlin
+import kotlin.contracts.ExperimentalContracts
+import kotlin.contracts.contract
+
+@OptIn(ExperimentalContracts::class)
+fun String?.isNotNullOrBlank(): Boolean {
+    contract {
+        returns(true) implies (this@isNotNullOrBlank != null)
+    }
+
+    return this != null && this.isNotBlank()
+}
+```
+
+이 함수가 `true`를 반환하면 receiver가 null이 아니라는 사실을 컴파일러에게 알려 줍니다.
+
+```kotlin
+fun normalize(value: String?): String {
+    if (!value.isNotNullOrBlank()) return "anonymous"
+
+    return value.trim()
+}
+```
+
+하지만 여기서 중요한 점은 `blank가 아니다`까지 타입에 표현되지는 않는다는 것입니다. Contract는 타입과 nullability 같은
+컴파일러 분석 정보에 영향을 주지만, business rule 전체를 타입으로 만들어 주지 않습니다.
+
+## 대응 개념 비교
+
+| Java/Spring 습관 | Kotlin에서 가까운 표현 | 판단 기준 |
+|---|---|---|
+| `instanceof` 뒤 명시 cast | smart cast | 지역 변수와 control flow가 단순할 때 |
+| `Assert.notNull()` | `requireNotNull()` 또는 command 변환 | runtime 실패를 명확히 드러낼 때 |
+| Bean Validation | request DTO 검증 | 외부 입력 경계에서 |
+| helper validation | nullable extension + 명시 반환 | compiler보다 사람이 읽는 의미가 중요할 때 |
+| IDE nullability 분석 | Kotlin type + smart cast | compile-time 경계가 필요할 때 |
+| custom assertion library | contract opt-in helper | 내부 테스트·DSL처럼 좁은 범위에서만 |
+
+Spring Boot 서비스에서는 보통 `contract`보다 command 변환이 더 좋은 선택입니다. Contract는 "검증 함수가 많아져 smart cast가
+왜 끊겼는지"를 설명하는 언어 기능으로 먼저 이해하는 편이 안전합니다.
+
+## 최소 실행 예제
+
+아래 예제는 Spring 없이 실행할 수 있습니다. 핵심은 사용자 정의 contract를 남발하지 않고, 외부 입력을 내부 command로 바꾸는
+경계를 세우는 것입니다.
+
+```kotlin
+data class CreateMemberRequest(
+    val email: String?,
+    val displayName: String?,
+)
+
+data class CreateMemberCommand(
+    val email: String,
+    val displayName: String,
+)
+
+fun CreateMemberRequest.toCommand(): CreateMemberCommand {
+    val normalizedEmail = requireNotNull(email?.trim()?.takeIf { it.isNotEmpty() }) {
+        "email is required"
+    }
+
+    val normalizedName = displayName
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: "anonymous"
+
+    return CreateMemberCommand(
+        email = normalizedEmail,
+        displayName = normalizedName,
+    )
+}
+
+fun main() {
+    val command = CreateMemberRequest(
+        email = " user@example.com ",
+        displayName = " Spring Developer ",
+    ).toCommand()
+
+    println(command)
+}
+```
+
+여기서는 `requireNotNull` 이후 `normalizedEmail`이 `String`입니다. Service method가 `CreateMemberCommand`를 받으면
+그 뒤 코드는 nullable 입력을 다시 고민하지 않아도 됩니다.
+
+Contract helper가 필요한 경우는 더 좁습니다. 예를 들어 사내 DSL이나 test fixture builder에서 lambda가 정확히 한 번
+실행된다는 사실을 컴파일러에게 알려야 할 때입니다.
+
+```kotlin
+import kotlin.contracts.ExperimentalContracts
+import kotlin.contracts.InvocationKind
+import kotlin.contracts.contract
+
+@OptIn(ExperimentalContracts::class)
+inline fun <T> buildOnce(block: () -> T): T {
+    contract {
+        callsInPlace(block, InvocationKind.EXACTLY_ONCE)
+    }
+
+    return block()
+}
+```
+
+이런 코드는 library boundary에서만 조심스럽게 둡니다. 일반 service method의 null 검증까지 모두 custom contract로 감싸면
+팀원이 contract 의미를 해석해야 하므로 오히려 읽기 어려워집니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫째, "contract를 쓰면 runtime 검증이 강해진다"는 오해입니다. Contract 선언만으로 값이 검증되지 않습니다. 실제 `return`
+전에 조건을 확인하고 exception을 던지거나 boolean을 반환하는 구현이 있어야 합니다.
+
+둘째, "Bean Validation을 대체할 수 있다"는 오해입니다. Bean Validation은 외부 입력 계약입니다. Contract는 Kotlin compiler
+analysis와 관련된 언어 기능입니다. HTTP 요청의 오류 메시지, locale, field path, status code를 contract가 만들어 주지
+않습니다.
+
+셋째, "모든 validation helper에 contract를 붙이면 Kotlin답다"는 오해입니다. 사용자 정의 contract API는 opt-in이 필요한
+실험적 API입니다. Public API로 퍼지면 Kotlin 버전 변경과 팀 학습 비용이 같이 커집니다.
+
+넷째, "smart cast가 안 되면 contract가 답이다"라는 오해입니다. `val`로 지역 변수에 담거나, `return`으로 guard clause를
+끝내거나, DTO를 command로 변환하면 대부분 더 단순합니다.
+
+## 연습 문제
+
+1. nullable request DTO를 non-null command로 바꾸는 `toCommand()` 함수를 작성해 보세요. `requireNotNull`, `takeIf`,
+   `trim`을 사용하되 service method에는 nullable 값을 넘기지 않습니다.
+2. `Any?`를 받아 `String`이면 길이를, 아니면 0을 반환하는 함수를 smart cast만으로 작성해 보세요.
+3. 현재 프로젝트의 validation helper 중 "사람은 알지만 compiler는 모르는" 함수가 있는지 찾고, contract 대신 지역 변수와
+   command 변환으로 풀 수 있는지 비교해 보세요.
+
+## 다음 글 예고
+
+Kotlin 학습의 다음 단계에서는 Java 개발자가 가장 많이 헷갈리는 파일, package, module 경계를 다시 봅니다. Kotlin 코드는
+짧게 쓸수록 좋아지는 것이 아니라, compile-time 경계와 runtime 경계가 서로 다른 층에 있다는 점을 드러낼 때 좋아집니다.
+
+## 참고자료
+
+- [Kotlin release process](https://kotlinlang.org/docs/releases.html) -
+  2026년 9월 24일 확인, 최신 안정 버전 `2.4.20`과 다음 `2.5.0` 예정 일정 기준
+- [What's new in Kotlin 2.4.20](https://kotlinlang.org/docs/whatsnew2420.html) -
+  2026년 9월 24일 확인, 2026년 9월 7일 정식 릴리스 기준
+- [Kotlin Type checks and casts](https://kotlinlang.org/docs/typecasts.html) -
+  2026년 9월 24일 확인, smart cast와 control flow 설명 기준
+- [kotlin.contracts API](https://kotlinlang.org/api/core/kotlin-stdlib/kotlin.contracts/) -
+  2026년 9월 24일 확인, `ExperimentalContracts` opt-in 표시 기준
+- [Kotlin inline functions](https://kotlinlang.org/docs/inline-functions.html) -
+  2026년 9월 24일 확인, inline lambda와 control flow 설명 기준
