@@ -1,0 +1,269 @@
+---
+title: "Spring Boot 개발자를 위한 Kotlin 열다섯째 걸음: object와 companion object로 static 습관 정리하기"
+description: "Java static, enum singleton, Spring bean에 익숙한 개발자를 위해 Kotlin object declaration, companion object, @JvmStatic의 경계를 정리합니다."
+publishedAt: 2026-09-25T08:45:00+09:00
+draft: false
+category: "Backend"
+tags: ["Kotlin", "Object", "Companion Object", "Spring Boot", "Java Interop"]
+kind: "learning"
+heroImage: "../../assets/blog/kotlin-object-companion-static-boundary-2026-09-25/cover.webp"
+heroImageAlt: "Kotlin object, companion object, Java static 호출, Spring bean 경계를 나누어 보는 무텍스트 백엔드 학습 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 Kotlin 학습"
+lesson: 15
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 9월 25일에 Kotlin release process, Kotlin 2.4.20 릴리스 노트, object declarations,
+> Kotlin에서 Java로 호출되는 interop 문서를 확인했습니다. 기준 안정 버전은 `Kotlin 2.4.20`입니다.
+> 이 글은 JVM 서버 코드 기준이며, preview/EAP 기능을 안정 기능처럼 다루지 않습니다.
+
+## 결론부터 말하면
+
+Kotlin의 `object`와 `companion object`는 Java의 `static`을 1:1로 옮기는 문법이 아닙니다.
+Spring Boot 개발자에게는 "클래스에 붙은 전역 도구"처럼 보이지만, Kotlin 공식 문서는 companion object의 멤버가
+겉보기와 달리 companion object 인스턴스의 멤버라고 설명합니다. JVM에서 Java 호출 모양을 맞춰야 할 때만
+`@JvmStatic`, `@JvmField`, `const val` 같은 interop 장치를 선택합니다.
+
+실무 기준은 단순합니다.
+
+- 상태가 없는 순수 helper는 top-level 함수나 작은 `object`로 둡니다.
+- Spring 의존성이 필요하면 `object`가 아니라 bean으로 둡니다.
+- Java에서 `Type.method()` 모양으로 호출해야 하는 공개 API에만 `@JvmStatic`을 검토합니다.
+- 상수는 runtime 값인지 compile-time constant인지 먼저 나눕니다.
+- companion object를 "static 필드 모음"으로 쓰기 시작하면 테스트와 DI 경계가 금방 흐려집니다.
+
+## 이번 주 개념
+
+Kotlin에는 클래스 없이 파일 바로 아래에 함수와 프로퍼티를 둘 수 있습니다. 그래서 Java처럼 모든 helper를
+`Utils` class 안에 넣을 필요가 없습니다.
+
+```kotlin
+package example.member
+
+fun normalizeEmail(value: String): String =
+    value.trim().lowercase()
+```
+
+하지만 한 타입에 강하게 묶인 factory, parser, constant가 필요할 때는 companion object가 자연스럽습니다.
+
+```kotlin
+class Email private constructor(
+    val value: String,
+) {
+    companion object {
+        fun parse(raw: String): Email =
+            Email(raw.trim().lowercase())
+    }
+}
+
+fun main() {
+    val email = Email.parse(" USER@example.com ")
+    println(email.value)
+}
+```
+
+여기서 `Email.parse()`는 Java의 static factory처럼 보입니다. 그러나 Kotlin 관점에서는 `Email`의 companion object가
+가진 함수입니다. 이 차이를 알면 "언제 static처럼 보이게 만들 것인가"와 "언제 Kotlin답게 둘 것인가"를 나눌 수 있습니다.
+
+<Mermaid title="Kotlin object와 static 경계">
+{`flowchart LR
+  JavaStatic["Java static habit"] --> Question{"What is the boundary?"}
+  Question --> Pure["Pure helper or constant"]
+  Question --> Factory["Type factory"]
+  Question --> Dependency["Needs Spring dependency"]
+  Pure --> TopLevel["Top-level function<br/>or object"]
+  Factory --> Companion["companion object"]
+  Dependency --> Bean["Spring bean"]
+  Companion --> JavaInterop{"Java caller needs<br/>Type.method()?"}
+  JavaInterop -->|yes| JvmStatic["@JvmStatic"]
+  JavaInterop -->|no| KotlinCall["Keep Kotlin call shape"]
+`}
+</Mermaid>
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Java에서는 유틸리티 함수, factory, 상수를 `static`으로 묶는 습관이 흔합니다.
+
+```java
+public final class Emails {
+    private Emails() {
+    }
+
+    public static String normalize(String value) {
+        return value.trim().toLowerCase();
+    }
+}
+```
+
+이 방식은 호출이 쉽습니다. 대신 시간이 지나면 세 가지가 섞이기 쉽습니다.
+
+| Java에서 자주 섞이는 것 | 문제 |
+|---|---|
+| 순수 문자열 helper | 어디서든 호출되어 domain 의미가 흐려짐 |
+| 설정값 constant | runtime 설정과 compile-time 상수가 섞임 |
+| 외부 의존성 호출 | 테스트 대역과 Spring DI를 우회함 |
+
+Spring Boot에서는 특히 마지막이 위험합니다. `static` helper가 repository, clock, object mapper, 외부 client를
+알기 시작하면 bean 생명주기 밖에서 동작하는 작은 service가 됩니다. Kotlin의 `object`도 같은 함정에 빠질 수 있습니다.
+
+## Kotlin에서는 무엇이 다른가
+
+`object` declaration은 singleton 인스턴스를 선언합니다.
+
+```kotlin
+object EmailNormalizer {
+    fun normalize(value: String): String =
+        value.trim().lowercase()
+}
+```
+
+이 코드는 간단하고 좋습니다. 다만 Spring bean이 아닙니다. 생성자 주입을 받을 수도 없고, 테스트에서 대체하기도 어렵습니다.
+따라서 clock, repository, HTTP client, object mapper 설정처럼 application context가 관리해야 하는 의존성이 들어오면
+`object`에서 멈춰야 합니다.
+
+```kotlin
+class MemberService(
+    private val clock: Clock,
+    private val repository: MemberRepository,
+) {
+    fun register(command: RegisterMemberCommand): Member {
+        val now = Instant.now(clock)
+        return repository.save(Member(command.email, now))
+    }
+}
+```
+
+반대로 companion object는 특정 class와 함께 읽는 factory나 named constructor에 어울립니다.
+
+```kotlin
+data class Money(
+    val amount: Long,
+    val currency: String,
+) {
+    companion object {
+        fun krw(amount: Long): Money =
+            Money(amount = amount, currency = "KRW")
+    }
+}
+```
+
+이 정도는 타입의 문맥을 보강합니다. 하지만 companion object 안에 cache, mutable map, Spring property를 넣기 시작하면
+전역 상태가 됩니다.
+
+## 대응 개념 비교
+
+| Java/Spring 습관 | Kotlin 표현 | 서버 코드 판단 기준 |
+|---|---|---|
+| `public static final String` | `const val` 또는 `val` | compile-time 상수인지 runtime 값인지 먼저 확인 |
+| `static factory method` | `companion object` factory | 타입 생성 규칙이 class와 강하게 묶일 때 |
+| `Utils` class | top-level function, 작은 `object` | 상태 없는 순수 변환일 때 |
+| enum singleton | `object` | 의존성 없는 singleton 값일 때 |
+| Spring singleton bean | `@Service`, `@Component` class | 의존성과 lifecycle이 필요할 때 |
+| Java caller용 static method | `@JvmStatic` | Java API 호환성이 명확히 필요할 때만 |
+
+Kotlin 공식 interop 문서는 `@JvmStatic`을 붙이면 companion object의 함수에 대해 enclosing class의 static method와
+companion object의 instance method가 함께 생성된다고 설명합니다. Kotlin 코드만 있는 프로젝트라면 굳이 Java 호출 모양을
+먼저 맞출 이유가 없습니다.
+
+## 최소 실행 예제
+
+아래 예제는 세 경계를 나눕니다. 순수 formatting은 top-level 함수, 타입 생성은 companion object, 상태가 있는 처리는
+service class로 둡니다.
+
+```kotlin
+import java.time.Clock
+import java.time.Instant
+
+fun normalizeEmail(value: String): String =
+    value.trim().lowercase()
+
+data class Email private constructor(
+    val value: String,
+) {
+    companion object {
+        fun parse(raw: String): Email =
+            Email(normalizeEmail(raw))
+    }
+}
+
+data class Member(
+    val email: Email,
+    val createdAt: Instant,
+)
+
+class MemberFactory(
+    private val clock: Clock,
+) {
+    fun create(rawEmail: String): Member =
+        Member(
+            email = Email.parse(rawEmail),
+            createdAt = Instant.now(clock),
+        )
+}
+
+fun main() {
+    val factory = MemberFactory(Clock.systemUTC())
+    val member = factory.create(" USER@example.com ")
+
+    println(member)
+}
+```
+
+이 코드에서 `Email.parse()`는 타입의 생성 규칙입니다. `MemberFactory`는 시간이라는 외부 상태를 읽으므로 class로 남깁니다.
+Spring Boot라면 `MemberFactory`를 bean으로 등록하고 `Clock`을 주입하는 편이 테스트하기 쉽습니다.
+
+Java 호출자가 필요한 library API라면 아래처럼 선택적으로 `@JvmStatic`을 붙입니다.
+
+```kotlin
+class Email private constructor(
+    val value: String,
+) {
+    companion object {
+        @JvmStatic
+        fun parse(raw: String): Email =
+            Email(raw.trim().lowercase())
+    }
+}
+```
+
+Java에서는 `Email.parse("...")`로 부를 수 있습니다. 그러나 Kotlin 내부 호출만 있다면 annotation 없이도
+`Email.parse("...")` 모양은 그대로 쓸 수 있습니다. 차이는 Kotlin 문법이 아니라 생성되는 JVM API입니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫째, "`companion object`는 Java static이다"라는 오해입니다. 호출 모양은 비슷하지만 companion object는 객체입니다.
+그래서 interface를 구현할 수도 있고, Java interop을 위해 별도 annotation을 붙여야 하는 경우도 있습니다.
+
+둘째, "`object`는 Spring singleton bean과 같다"는 오해입니다. 둘 다 하나처럼 보이지만 lifecycle과 테스트 방식이 다릅니다.
+Spring bean은 container가 만들고 주입합니다. Kotlin `object`는 언어 차원의 singleton입니다.
+
+셋째, "상수는 모두 companion object에 넣으면 된다"는 오해입니다. compile-time constant는 `const val`이어야 하고,
+환경별 설정값은 companion object가 아니라 configuration property나 bean 경계에서 읽어야 합니다.
+
+넷째, "Java에서 예쁘게 보이려면 전부 `@JvmStatic`을 붙이면 된다"는 오해입니다. `@JvmStatic`은 JVM API를 늘립니다.
+Java 호출자가 없는 내부 코드라면 생성되는 method를 늘릴 이유가 없습니다.
+
+## 연습 문제
+
+1. 현재 Java 프로젝트의 `StringUtils`, `DateUtils`, `Constants` 중 하나를 골라 순수 helper, 타입 factory, runtime 설정으로
+   세 그룹에 나눠 보세요.
+2. `Money.krw(1000)` factory를 companion object로 만들고, `currency` 값을 외부 설정에서 읽는 버전은 왜 service class가
+   더 나은지 설명해 보세요.
+3. Java 코드에서 호출해야 하는 Kotlin factory 하나에만 `@JvmStatic`을 붙이고, 붙이기 전후의 Java 호출 모양을 비교해 보세요.
+
+## 다음 글 예고
+
+다음 Kotlin 글에서는 package, module, visibility를 다시 봅니다. Java의 package-private 감각과 Kotlin의 `internal`,
+top-level `private`는 비슷해 보이지만 build module 경계를 기준으로 다르게 움직입니다.
+
+## 참고자료
+
+- [Kotlin release process](https://kotlinlang.org/docs/releases.html)
+- [What's new in Kotlin 2.4.20](https://kotlinlang.org/docs/whatsnew2420.html)
+- [Kotlin object declarations and expressions](https://kotlinlang.org/docs/object-declarations.html)
+- [Calling Kotlin from Java](https://kotlinlang.org/docs/java-to-kotlin-interop.html)

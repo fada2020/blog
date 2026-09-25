@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /배포 값은 한 파일에서 시작/ })
+    .getByRole("link", { name: /추석 주말은 회복 리듬/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/env-contract-deployment-retrospective-2026-09-24\/$/,
+    /\/blog\/posts\/toddler-chuseok-weekend-care-plan-2026-09-25\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "환경 설정 회고: 배포 값은 한 파일에서 시작해야 흔들리지 않습니다",
+    "24개월 아이 케어: 추석 주말은 회복 리듬 먼저 보기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "중앙 환경 설정 파일이 Jenkins, Docker 컨테이너, Next.js 서버, Cloudflare 터널 검증으로 퍼지는 무텍스트 배포 다이어그램",
+    "24개월 아이의 추석 주말을 지원 제도, 감염병 체크, 날씨, 낮잠, 회복 리듬으로 나누어 보는 무텍스트 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /배포 값은 한 파일에서 시작/,
+      name: /추석 주말은 회복 리듬/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /contracts로 smart cast 경계/,
+      name: /object와 companion object로 static 습관/,
     }),
   ).toBeVisible();
 });
