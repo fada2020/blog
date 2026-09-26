@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /추석 주말은 회복 리듬/ })
+    .getByRole("link", { name: /휴장 사이에 쌓인 금리와 반도체 수출/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/toddler-chuseok-weekend-care-plan-2026-09-25\/$/,
+    /\/blog\/posts\/saturday-market-yields-holiday-chip-exports-2026-09-26\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "24개월 아이 케어: 추석 주말은 회복 리듬 먼저 보기",
+    "토요일 주식 학습: 휴장 사이에 쌓인 금리와 반도체 수출 읽기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "24개월 아이의 추석 주말을 지원 제도, 감염병 체크, 날씨, 낮잠, 회복 리듬으로 나누어 보는 무텍스트 다이어그램",
+    "미국 국채금리, 원유 재고, 달러 원 환율, 한국 반도체 수출과 휴장 리스크가 연결된 무텍스트 시장 리스크 지도",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /추석 주말은 회복 리듬/,
+      name: /휴장 사이에 쌓인 금리와 반도체 수출/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /object와 companion object로 static 습관/,
+      name: /visibility modifier로 모듈 경계/,
     }),
   ).toBeVisible();
 });

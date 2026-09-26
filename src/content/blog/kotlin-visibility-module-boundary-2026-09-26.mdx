@@ -1,0 +1,242 @@
+---
+title: "Spring Boot 개발자를 위한 Kotlin 열여섯째 걸음: visibility modifier로 모듈 경계 세우기"
+description: "Java package-private과 Spring 계층 구조에 익숙한 개발자를 위해 Kotlin public, private, protected, internal의 실제 공개 범위를 정리합니다."
+publishedAt: 2026-09-26T08:42:00+09:00
+draft: false
+category: "Backend"
+tags: ["Kotlin", "Visibility", "Internal", "Spring Boot", "API Design"]
+kind: "learning"
+heroImage: "../../assets/blog/kotlin-visibility-module-boundary-2026-09-26/cover.webp"
+heroImageAlt: "Kotlin visibility modifier와 Spring Boot 모듈 경계를 나누어 보는 무텍스트 백엔드 학습 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 Kotlin 학습"
+lesson: 16
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 9월 26일에 Kotlin visibility modifiers, packages and imports, API guideline 문서와
+> JetBrains Kotlin 릴리스 목록을 확인했습니다. 기준 안정 버전은 `Kotlin 2.4.20`입니다.
+> `Kotlin 2.5.0-Beta1`은 pre-release라 이 글의 안정 기준으로 사용하지 않았습니다.
+
+## 결론부터 말하면
+
+Kotlin의 visibility modifier는 Java의 `public`, `protected`, package-private, `private`을 그대로 옮긴 표가 아닙니다.
+Spring Boot 개발자가 가장 자주 헷갈리는 지점은 두 가지입니다.
+
+- Kotlin에는 Java의 package-private과 같은 기본 공개 범위가 없습니다.
+- `internal`은 "같은 패키지"가 아니라 "같은 모듈"에서 보입니다.
+
+그래서 Kotlin 서버 코드는 "패키지 이름으로 숨긴다"보다 "파일, 클래스, Gradle source set, Maven module 중 어디까지 열 것인가"를
+먼저 정해야 합니다. 공개 API는 의식적으로 `public`으로 남기고, 구현 세부사항은 `private` 또는 `internal`로 줄이는 식입니다.
+
+## 이번 주 개념
+
+Kotlin 공식 문서는 네 가지 visibility modifier를 설명합니다. 기본값은 `public`입니다.
+
+| modifier | Kotlin에서 보이는 범위 | Spring Boot 코드에서 먼저 떠올릴 사용처 |
+|---|---|---|
+| `public` | 어디서든 접근 가능 | controller, public DTO, 외부 모듈 API |
+| `private` top-level | 같은 파일 안에서만 접근 가능 | 파일 내부 helper, mapper 보조 함수 |
+| `private` member | 같은 class 안에서만 접근 가능 | service 내부 계산, repository query 조립 |
+| `protected` | class와 하위 class에서 접근 가능 | 상속 기반 확장점이 정말 필요할 때 |
+| `internal` | 같은 Kotlin module 안에서 접근 가능 | 모듈 내부 adapter, test에서 검증할 구현 |
+
+<Mermaid title="Kotlin visibility 선택 순서">
+{`flowchart LR
+  Decl["new declaration"] --> PublicApi{"external API?"}
+  PublicApi -->|yes| Public["public"]
+  PublicApi -->|no| SameFile{"used only in this file?"}
+  SameFile -->|yes| FilePrivate["top-level private"]
+  SameFile -->|no| SameClass{"class invariant?"}
+  SameClass -->|yes| MemberPrivate["member private"]
+  SameClass -->|no| SameModule{"same module only?"}
+  SameModule -->|yes| Internal["internal"]
+  SameModule -->|no| Public
+`}
+</Mermaid>
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Java에서는 package-private을 많이 씁니다.
+
+```java
+package example.member;
+
+class MemberPolicy {
+    boolean canRegister(Member member) {
+        return member.isActive();
+    }
+}
+```
+
+modifier를 쓰지 않으면 같은 package 안에서만 보입니다. Spring 프로젝트에서는 이 습관 때문에 `service`, `repository`,
+`support` 같은 package 구조가 사실상의 경계처럼 쓰이기도 합니다.
+
+하지만 Kotlin에서 modifier를 생략하면 `public`입니다.
+
+```kotlin
+package example.member
+
+class MemberPolicy {
+    fun canRegister(member: Member): Boolean =
+        member.active
+}
+```
+
+이 코드는 package-private이 아니라 공개 class입니다. "Java에서 생략했으니 숨겨졌겠지"라고 생각하면 API 표면이 예상보다 커집니다.
+
+## Kotlin에서는 무엇이 다른가
+
+파일 바로 아래에 선언한 `private`은 같은 파일에서만 보입니다.
+
+```kotlin
+package example.member
+
+private fun normalizeEmail(value: String): String =
+    value.trim().lowercase()
+
+class RegisterMemberCommand(
+    rawEmail: String,
+) {
+    val email: String = normalizeEmail(rawEmail)
+}
+```
+
+이 함수는 같은 package의 다른 파일에서도 보이지 않습니다. 작은 helper를 감추기에는 package-private보다 더 좁고 명확합니다.
+
+`internal`은 같은 module 안에서 보입니다. 공식 문서는 module 예시로 IntelliJ IDEA module, Maven project, Gradle source set을 듭니다.
+특히 Gradle에서는 `test` source set이 `main`의 `internal` 선언에 접근할 수 있다는 예외가 중요합니다.
+
+```kotlin
+internal class MemberRegistrationPolicy {
+    fun canRegister(command: RegisterMemberCommand): Boolean =
+        command.email.isNotBlank()
+}
+```
+
+이 class는 같은 module의 production 코드와 test에서는 보이지만, 다른 module이 의존할 public API로 열리지는 않습니다.
+
+## 대응 개념 비교
+
+| Java/Spring 습관 | Kotlin에서의 가까운 선택 | 주의점 |
+|---|---|---|
+| modifier 생략 package-private | `internal` 또는 `private` | 기본값이 `public`이라 생략하면 반대로 넓어짐 |
+| utility class 내부 private method | top-level `private fun` | 같은 파일에서만 공유할 때 깔끔함 |
+| package 내부 구현 class | `internal class` | 같은 module 전체에 열림, 같은 package만이 아님 |
+| protected template method | `protected` | Kotlin에서도 상속 설계가 필요할 때만 |
+| public DTO/controller | `public` 기본값 | library API라면 explicit API mode도 검토 |
+
+`protected`도 Java와 완전히 같다고 보면 곤란합니다. Kotlin 공식 문서는 top-level 선언에는 `protected`를 사용할 수 없다고 설명합니다.
+또 Kotlin에서는 outer class가 inner class의 private member를 자동으로 볼 수 없습니다. 공개 범위가 더 단단한 쪽으로 설계되어 있습니다.
+
+## 최소 실행 예제
+
+아래 예제는 Spring Boot service에서 공개 명령, module 내부 정책, 파일 내부 helper를 나눕니다.
+
+```kotlin
+package example.member
+
+data class RegisterMemberCommand(
+    val email: String,
+)
+
+data class Member(
+    val email: String,
+    val active: Boolean,
+)
+
+private fun normalizeEmail(value: String): String =
+    value.trim().lowercase()
+
+internal class MemberRegistrationPolicy {
+    fun normalize(command: RegisterMemberCommand): RegisterMemberCommand =
+        command.copy(email = normalizeEmail(command.email))
+
+    fun canRegister(member: Member): Boolean =
+        member.active
+}
+
+class MemberService(
+    private val policy: MemberRegistrationPolicy,
+    private val repository: MemberRepository,
+) {
+    fun register(command: RegisterMemberCommand): Member {
+        val normalized = policy.normalize(command)
+        val existing = repository.findByEmail(normalized.email)
+
+        require(existing == null || policy.canRegister(existing)) {
+            "member cannot be registered"
+        }
+
+        return repository.save(Member(normalized.email, active = true))
+    }
+}
+```
+
+여기서 외부에 보여도 되는 것은 `RegisterMemberCommand`, `Member`, `MemberService.register()`입니다.
+`normalizeEmail()`은 같은 파일 helper라 `private`입니다. `MemberRegistrationPolicy`는 service 조립과 test에서는 필요하지만,
+다른 module의 공개 계약은 아니므로 `internal`로 둘 수 있습니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫째, "`internal`은 같은 package 전용이다"라는 오해입니다. `internal`은 package가 아니라 module 기준입니다.
+패키지를 잘게 나눴더라도 같은 Gradle source set 안이면 접근할 수 있습니다.
+
+둘째, "modifier를 안 붙이면 Java처럼 제한된다"라는 오해입니다. Kotlin 기본값은 `public`입니다.
+공개 의도가 없는 class와 함수는 의식적으로 좁혀야 합니다.
+
+셋째, "`private` top-level 함수는 같은 package에서 공유된다"라는 오해입니다. 파일 바깥에서는 보이지 않습니다.
+여러 파일에서 공유해야 한다면 `internal` helper로 올리거나, 역할이 분명한 class로 묶습니다.
+
+넷째, "테스트 때문에 모두 public으로 열어야 한다"라는 오해입니다. Kotlin/Gradle에서는 test source set이 main의 `internal` 선언에 접근할 수 있습니다.
+모든 구현을 public으로 열기 전에 module 경계를 먼저 확인하는 편이 낫습니다.
+
+## 연습 문제
+
+아래 선언에 modifier를 붙여 보세요.
+
+```kotlin
+package example.payment
+
+fun normalizeCardNumber(value: String): String =
+    value.filter(Char::isDigit)
+
+class PaymentGatewayAdapter(
+    private val client: PaymentClient,
+) {
+    fun approve(command: ApprovePaymentCommand): PaymentResult =
+        client.approve(command)
+}
+
+class PaymentController(
+    private val adapter: PaymentGatewayAdapter,
+)
+```
+
+추천 답은 이렇습니다.
+
+- `normalizeCardNumber()`가 한 파일에서만 쓰이면 `private`.
+- `PaymentGatewayAdapter`가 같은 module 내부 구현이면 `internal`.
+- `PaymentController`는 Spring이 찾고 route로 노출하는 entrypoint이므로 기본 `public`을 유지.
+- 외부 module이 직접 써야 하는 `ApprovePaymentCommand`, `PaymentResult`는 public contract로 남김.
+
+마지막 점검 질문은 간단합니다.
+
+```text
+이 선언은 다른 module의 사용자가 알아야 하는가?
+아니라면 같은 파일, 같은 class, 같은 module 중 어디까지 열면 충분한가?
+```
+
+visibility modifier는 문법 암기가 아니라 공개 범위를 줄이는 도구입니다. Spring Boot의 계층 구조와 Kotlin module 경계를 같이 보면,
+불필요하게 열린 helper와 adapter를 훨씬 빨리 발견할 수 있습니다.
+
+## 참고자료
+
+- [Kotlin Documentation - Visibility modifiers](https://kotlinlang.org/docs/visibility-modifiers.html)
+- [Kotlin Documentation - Packages and imports](https://kotlinlang.org/docs/packages.html)
+- [Kotlin API Guidelines - Simplicity](https://kotlinlang.org/docs/api-guidelines-simplicity.html)
+- [JetBrains Kotlin Releases](https://github.com/JetBrains/kotlin/releases)
