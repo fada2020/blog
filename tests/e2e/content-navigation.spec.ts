@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /휴장 사이에 쌓인 금리와 반도체 수출/ })
+    .getByRole("link", { name: /유가 완화와 5% 금리 사이 AI 반도체 장부/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/saturday-market-yields-holiday-chip-exports-2026-09-26\/$/,
+    /\/blog\/posts\/sunday-market-oil-yields-chip-ledger-2026-09-27\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "토요일 주식 학습: 휴장 사이에 쌓인 금리와 반도체 수출 읽기",
+    "일요일 주식 학습: 유가 완화와 5% 금리 사이 AI 반도체 장부",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "미국 국채금리, 원유 재고, 달러 원 환율, 한국 반도체 수출과 휴장 리스크가 연결된 무텍스트 시장 리스크 지도",
+    "유가, 미국 10년물 금리, Nasdaq, 한국 반도체 수출, 환율 점검표가 연결된 무텍스트 시장 장부 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /휴장 사이에 쌓인 금리와 반도체 수출/,
+      name: /유가 완화와 5% 금리 사이 AI 반도체 장부/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /visibility modifier로 모듈 경계/,
+      name: /PostgreSQL 18 업그레이드를 Spring Boot 장부로 쪼개기/,
     }),
   ).toBeVisible();
 });

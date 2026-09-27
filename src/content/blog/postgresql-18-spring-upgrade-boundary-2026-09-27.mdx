@@ -1,0 +1,199 @@
+---
+title: "주간 기술 심화: PostgreSQL 18 업그레이드를 Spring Boot 장부로 쪼개기"
+description: "PostgreSQL 18.6, 18의 주요 변경, pgJDBC 42.7.13을 Spring Boot 서비스 업그레이드 관점에서 기능 장부와 위험 장부로 나눕니다."
+publishedAt: 2026-09-27T09:03:00+09:00
+draft: false
+category: "Database"
+tags: ["PostgreSQL", "Spring Boot", "JDBC", "Database Migration", "Security"]
+kind: "deep-dive"
+heroImage: "../../assets/blog/postgresql-18-spring-upgrade-boundary-2026-09-27/cover.webp"
+heroImageAlt: "PostgreSQL 18 데이터베이스, Spring Boot 서비스, JDBC 드라이버, 보안 점검표가 연결된 무텍스트 업그레이드 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "주간 기술 심화"
+lesson: 8
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 9월 27일 KST 기준으로 PostgreSQL 공식 문서의 PostgreSQL 18.6 release notes와 PostgreSQL 18 major
+> release notes, pgJDBC 공식 사이트의 42.7.13 release notes, Spring Boot 공식 프로젝트 페이지를 확인했습니다.
+> PostgreSQL 18.6을 현재 PostgreSQL 18 계열 문서 기준 버전으로 보고, PostgreSQL 19 Beta 4는 beta이므로 운영
+> 업그레이드 기준에서 제외했습니다. preview, beta, RC 기능은 안정 기능처럼 다루지 않았습니다.
+
+## 이번 글의 질문
+
+데이터베이스 업그레이드는 "버전 올리기"가 아니라 세 장부를 동시에 맞추는 일입니다.
+
+1. 서버 장부: PostgreSQL 18에서 바뀐 동작과 18.6의 보안·수정 사항
+2. 드라이버 장부: pgJDBC 42.7.13이 Spring Boot 애플리케이션에 주는 영향
+3. 운영 장부: migration, rollback, connection pool, index, replication slot 점검
+
+Spring Boot 개발자에게 중요한 결론은 간단합니다. PostgreSQL 18은 `uuidv7()`, virtual generated columns,
+pg_upgrade 통계 유지처럼 매력적인 기능을 줍니다. 하지만 MD5 password deprecation, logical decoding output plugin
+제한, GIN 통계·일부 extension reindex 같은 운영 점검도 같이 옵니다.
+
+## 서버 장부: 18.6은 "새 기능"보다 운영 안전을 먼저 본다
+
+PostgreSQL 18.6 release notes는 18.4 이후의 수정 릴리스입니다. 18.x에서 18.6으로 이동할 때 dump/restore는 필요하지
+않다고 안내하지만, 첫 보안 항목들은 설정 조정과 데이터 정리가 필요할 수 있다고 말합니다.
+
+| 확인 항목 | Spring Boot 팀에서 볼 질문 | 배포 전 판단 |
+|---|---|---|
+| `output_plugin_libraries` | logical replication slot이나 CDC 도구가 custom output plugin을 쓰는가 | 새 cluster 설정에 허용 목록 추가 |
+| `pgcrypto` PGP 암호화 수정 | deprecated cipher로 암호화된 데이터가 남아 있는가 | 식별, 복호화, 재암호화 계획 필요 |
+| GIN index `reltuples` | GIN index 통계에 의존하는 query plan이 있는가 | `ANALYZE`, 필요 시 재색인 점검 |
+| `btree_gist`, `ltree` | 해당 extension index를 쓰는가 | release notes 지시대로 reindex 범위 확인 |
+
+즉 18.6은 "기능을 켜자"보다 "운영 장부를 먼저 맞추자"에 가깝습니다. Spring Boot 코드만 보면 놓칩니다. DBA가 따로
+있더라도 애플리케이션 팀은 CDC, search, migration job, batch query가 어디에 기대는지 알고 있어야 합니다.
+
+## major 18 장부: 기능은 좋아졌지만 호환성 메모가 더 중요하다
+
+PostgreSQL 18 major release에는 개발자 눈에 띄는 기능이 많습니다.
+
+| 기능 | 좋아지는 점 | 바로 적용하면 안 되는 이유 |
+|---|---|---|
+| `uuidv7()` | 시간 순서가 있는 UUID라 index locality에 유리 | 기존 UUID 생성 책임이 앱인지 DB인지 정해야 함 |
+| virtual generated columns | 읽을 때 계산되는 generated column이 기본 | 쓰기·읽기 비용 위치가 바뀌므로 query plan 확인 필요 |
+| pg_upgrade 통계 유지 | major upgrade 직후 성능 회복 시간을 줄일 수 있음 | 통계가 유지되어도 대표 query를 직접 재측정해야 함 |
+| skip scan | multi-column B-tree index 활용 범위 확대 | index가 "저절로" 좋아졌다고 보고 index 정리를 하면 위험 |
+| OAuth authentication | SSO 통합 가능성 확대 | managed database와 driver 지원 범위를 별도 확인 |
+
+반대로 호환성 메모도 큽니다. PostgreSQL 18은 MD5 password authentication을 deprecated로 표시했고, 향후 major release에서
+제거될 예정이라고 안내합니다. `initdb` 기본 data checksum 활성화, `VACUUM`/`ANALYZE`의 inheritance child 처리, CSV
+`COPY FROM`에서 `\.` 처리 변화, full text search와 `pg_trgm` 관련 reindex 권고도 있습니다.
+
+이런 항목은 application code review에서 잘 보이지 않습니다. 그래서 업그레이드 이슈를 "DBA 작업"으로만 분리하지 말고,
+Spring Boot 팀의 smoke test와 query test에 넣어야 합니다.
+
+<Mermaid title="PostgreSQL 18 업그레이드 장부">
+{`flowchart TD
+  Plan["upgrade plan"] --> Server["PostgreSQL 18.6 release notes"]
+  Plan --> Driver["pgJDBC 42.7.13"]
+  Plan --> App["Spring Boot smoke tests"]
+  Server --> Security["security and config ledger"]
+  Server --> Compat["compatibility ledger"]
+  Driver --> Pool["HikariCP and prepared statements"]
+  Driver --> Batch["batch insert behavior"]
+  App --> Queries["representative queries"]
+  App --> Jobs["migration and batch jobs"]
+  Security --> Gate["release gate"]
+  Compat --> Gate
+  Pool --> Gate
+  Batch --> Gate
+  Queries --> Gate
+  Jobs --> Gate
+`}
+</Mermaid>
+
+## 드라이버 장부: pgJDBC 42.7.13은 작은 옵션처럼 보여도 운영 영향이 있다
+
+pgJDBC 공식 사이트는 현재 release를 42.7.13으로 안내합니다. 42.7.13에는 PostgreSQL 18+의 `search_path` 변화 보고를
+받아 prepared statement cache를 무효화하는 기능, DDL 후 cache를 비우는 `flushCacheOnDdl`, batch insert rewrite 상한
+확대, `connectExecutor`, `classLoaderStrategy` 같은 항목이 들어 있습니다.
+
+Spring Boot에서는 이 변화가 세 곳에 닿습니다.
+
+```yaml
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 20
+  jpa:
+    properties:
+      hibernate.jdbc.batch_size: 100
+```
+
+첫째, connection pool입니다. driver 보안 수정은 TLS/SCRAM/channel binding 같은 인증 경로에 영향을 줍니다. 평소에는
+잘 보이지 않지만, 인증 실패가 나면 HikariCP pool 초기화 실패로 바로 드러납니다.
+
+둘째, server-prepared statement입니다. schema migration이 잦은 서비스에서 "cached plan must not change result type"
+류의 문제가 있었던 팀이라면 `flushCacheOnDdl` 기본 동작을 이해해야 합니다.
+
+셋째, batch insert입니다. `reWriteBatchedInserts`를 켠 팀은 42.7.13의 상한 확대가 긍정적일 수 있지만, bind parameter
+수와 transaction 크기가 같이 커질 수 있습니다. 처리량만 보지 말고 lock hold time과 replication lag도 봐야 합니다.
+
+## Spring Boot 업그레이드 체크리스트
+
+운영 변경은 한 번에 적용하지 않는 편이 안전합니다. 최소 장부는 이렇게 나눕니다.
+
+| 순서 | 확인 | 실패하면 되돌릴 단위 |
+|---|---|---|
+| 1 | staging DB를 18.6으로 준비하고 checksum, extension, auth 설정 기록 | DB image 또는 managed version |
+| 2 | pgJDBC 42.7.13으로 test suite 실행 | dependency version |
+| 3 | Flyway/Liquibase migration 전체 재실행 | migration script |
+| 4 | 대표 read/write query explain 비교 | index, statistics, query hint가 아닌 query structure |
+| 5 | batch insert와 scheduled job 재측정 | batch size와 driver option |
+| 6 | CDC/logical replication slot 점검 | `output_plugin_libraries`와 connector 설정 |
+| 7 | rollback drill | app rollback과 DB rollback을 분리 |
+
+여기서 중요한 점은 rollback입니다. 애플리케이션은 jar를 되돌리면 되지만, major DB upgrade는 쉽게 되돌아가지 않습니다.
+그래서 앱 배포와 DB major upgrade를 같은 창에 넣지 않는 편이 낫습니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫 번째 오해는 "ORM이 있으니 PostgreSQL 변경은 덜 중요하다"입니다. JPA가 SQL을 가려도 transaction isolation, index,
+prepared statement, authentication, connection pool은 그대로 운영 경계입니다.
+
+두 번째 오해는 "minor update는 무조건 안전하다"입니다. PostgreSQL 18.6은 dump/restore 없이 적용할 수 있지만, 보안
+수정 때문에 설정과 데이터 정리가 필요할 수 있다고 명시합니다. 적용 난이도와 영향 없음은 같은 말이 아닙니다.
+
+세 번째 오해는 "`uuidv7()`이 있으니 모든 ID를 DB에서 만들면 된다"입니다. ID 생성 책임은 event ordering, sharding,
+offline creation, test fixture 전략과 연결됩니다. 새 함수가 좋다는 사실과 우리 서비스의 책임 경계는 별도 결정입니다.
+
+## 따라 해 볼 실습
+
+로컬에서 운영 DB를 복제하지 말고, 먼저 작은 schema로 감각을 잡습니다.
+
+```sql
+create table event_log (
+  id uuid primary key default uuidv7(),
+  aggregate_id uuid not null,
+  payload jsonb not null,
+  created_at timestamptz not null default now(),
+  event_date date generated always as (created_at::date) virtual
+);
+```
+
+그다음 Spring Boot 쪽에서는 ID 생성 위치를 명확히 표시합니다.
+
+```java
+@Entity
+class EventLog {
+    @Id
+    @Column(columnDefinition = "uuid")
+    private UUID id;
+
+    @Column(nullable = false, columnDefinition = "jsonb")
+    private String payload;
+}
+```
+
+이 예제에서는 DB가 `id`를 만들게 둘지, 애플리케이션이 `UUID`를 채울지 결정해야 합니다. 둘 다 가능하지만 둘 다 동시에
+암묵적으로 열어 두면 테스트와 운영에서 다른 값 생성 경로가 생깁니다.
+
+## 오늘의 결론
+
+PostgreSQL 18은 Spring Boot 팀에게 좋은 업그레이드 후보입니다. 특히 UUIDv7, generated columns, pg_upgrade 통계 유지,
+JDBC prepared statement cache 개선은 실무에 닿습니다. 다만 운영 업그레이드의 성공 기준은 "앱이 뜬다"가 아닙니다.
+
+성공 기준은 더 구체적이어야 합니다.
+
+- authentication과 connection pool이 새 조합에서 안정적으로 열린다.
+- migration tool이 빈 DB와 기존 DB 모두에서 재현 가능하다.
+- 대표 query의 plan과 latency가 업그레이드 전후로 설명 가능하다.
+- CDC, batch, scheduled job, search index 재생성이 별도 점검됐다.
+- rollback 단위가 앱과 DB로 분리되어 있다.
+
+새 버전의 기능 목록보다 이 장부가 먼저 맞아야 합니다.
+
+## 참고자료
+
+- [PostgreSQL 18.6 Release Notes](https://www.postgresql.org/docs/release/18.6/)
+- [PostgreSQL 18 Release Notes](https://www.postgresql.org/docs/18/release-18.html)
+- [pgJDBC - PostgreSQL JDBC Driver](https://jdbc.postgresql.org/)
+- [pgJDBC 42.7.13 Release Notes](https://jdbc.postgresql.org/changelogs/2026-07-06-42.7.13-release/)
+- [Spring Boot Project](https://spring.io/projects/spring-boot)
