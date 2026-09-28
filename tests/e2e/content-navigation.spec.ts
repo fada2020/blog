@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /유가 완화와 5% 금리 사이 AI 반도체 장부/ })
+    .getByRole("link", { name: /실질금리로 월급통장 사다리 세우기/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/sunday-market-oil-yields-chip-ledger-2026-09-27\/$/,
+    /\/blog\/posts\/monday-money-real-rate-cash-ladder-2026-09-28\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "일요일 주식 학습: 유가 완화와 5% 금리 사이 AI 반도체 장부",
+    "월요일 경제 기초: 실질금리로 월급통장 사다리 세우기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "유가, 미국 10년물 금리, Nasdaq, 한국 반도체 수출, 환율 점검표가 연결된 무텍스트 시장 장부 다이어그램",
+    "월급통장, 비상금, 예금 만기 사다리, 물가, 기준금리가 연결된 무텍스트 개인 현금흐름 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /유가 완화와 5% 금리 사이 AI 반도체 장부/,
+      name: /실질금리로 월급통장 사다리 세우기/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /PostgreSQL 18 업그레이드를 Spring Boot 장부로 쪼개기/,
+      name: /Spring Boot 개발자를 위한 Flutter 열일곱째 걸음/,
     }),
   ).toBeVisible();
 });
@@ -111,14 +111,14 @@ test("카테고리와 태그로 공개 글을 탐색할 수 있다", async ({ pa
   await expect(page).toHaveURL(/\/blog\/categories\/Frontend\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Frontend 글");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 열여섯째 걸음/ }),
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 열일곱째 걸음/ }),
   ).toBeVisible();
 
   await page.getByRole("link", { name: "#Flutter", exact: true }).first().click();
   await expect(page).toHaveURL(/\/blog\/tags\/Flutter\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("#Flutter");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 열여섯째 걸음/ }),
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 열일곱째 걸음/ }),
   ).toBeVisible();
 });
 
@@ -150,7 +150,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("학습 글");
   await expect(
     page.getByRole("link", {
-      name: /Spring Boot 개발자를 위한 Flutter 열여섯째 걸음/,
+      name: /실질금리로 월급통장 사다리 세우기/,
     }),
   ).toBeVisible();
 
@@ -158,7 +158,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page).toHaveURL(/\/blog\/kinds\/learning\/page\/2\/$/);
   await expect(
     page.getByRole("link", {
-      name: "Spring Boot 개발자를 위한 Kotlin 열째 걸음: context parameters는 DI가 아니라 호출 문맥이다",
+      name: "Spring Boot 개발자를 위한 Kotlin 열한째 걸음: by delegation으로 어댑터 경계 줄이기",
     }),
   ).toBeVisible();
 });
