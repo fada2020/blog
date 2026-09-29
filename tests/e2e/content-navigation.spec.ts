@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /실질금리로 월급통장 사다리 세우기/ })
+    .getByRole("link", { name: /인증 증명, Java SDK 워밍업, Agent 거버넌스/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/monday-money-real-rate-cash-ladder-2026-09-28\/$/,
+    /\/blog\/posts\/weekly-it-trends-2026-09-29\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "월요일 경제 기초: 실질금리로 월급통장 사다리 세우기",
+    "2026년 9월 다섯째 주 IT 기술동향: 인증 증명, Java SDK 워밍업, Agent 거버넌스",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "월급통장, 비상금, 예금 만기 사다리, 물가, 기준금리가 연결된 무텍스트 개인 현금흐름 다이어그램",
+    "인증 재확인, CI 런타임, Java SDK 워밍업, 클라우드 에이전트 정책, GKE 노드 밀도가 연결된 무텍스트 기술 동향 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /실질금리로 월급통장 사다리 세우기/,
+      name: /인증 증명, Java SDK 워밍업, Agent 거버넌스/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Spring Boot 개발자를 위한 Flutter 열일곱째 걸음/,
+      name: /Spring Boot 개발자를 위한 Flutter 열여덟째 걸음/,
     }),
   ).toBeVisible();
 });
@@ -111,14 +111,14 @@ test("카테고리와 태그로 공개 글을 탐색할 수 있다", async ({ pa
   await expect(page).toHaveURL(/\/blog\/categories\/Frontend\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Frontend 글");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 열일곱째 걸음/ }),
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 열여덟째 걸음/ }),
   ).toBeVisible();
 
   await page.getByRole("link", { name: "#Flutter", exact: true }).first().click();
   await expect(page).toHaveURL(/\/blog\/tags\/Flutter\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("#Flutter");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 열일곱째 걸음/ }),
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 열여덟째 걸음/ }),
   ).toBeVisible();
 });
 

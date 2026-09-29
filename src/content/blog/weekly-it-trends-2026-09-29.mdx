@@ -1,0 +1,207 @@
+---
+title: "2026년 9월 다섯째 주 IT 기술동향: 인증 증명, Java SDK 워밍업, Agent 거버넌스"
+description: "2026년 9월 23일부터 9월 29일까지 공식 발표된 GitHub Actions Node 24 전환, GitHub proof of presence, AWS SDK for Java warm-up, Google Cloud agent governance와 GKE 변화를 Spring Boot 팀 관점에서 정리합니다."
+publishedAt: 2026-09-29T00:04:00+09:00
+draft: false
+category: "Tooling"
+tags: ["Tech Trends", "GitHub Actions", "Security", "AWS", "Google Cloud"]
+kind: "trend"
+heroImage: "../../assets/blog/weekly-it-trends-2026-09-29/cover.webp"
+heroImageAlt: "인증 재확인, CI 런타임, Java SDK 워밍업, 클라우드 에이전트 정책, GKE 노드 밀도가 연결된 무텍스트 기술 동향 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 범위**
+>
+> 2026년 9월 29일 KST에 공식 changelog, 공식 블로그, 공식 릴리스 노트를 확인했습니다. 범위는 2026년
+> 9월 23일부터 2026년 9월 29일까지 공개된 공식 발표입니다. 기준 상태는 GitHub Actions의 JavaScript action
+> Node 24 전환, GitHub proof of presence public preview, AWS SDK for Java 2.x `2.54.0` 이상 warm-up,
+> Google Cloud Gemini Enterprise Agent Platform semantic governance policy의 VPC Service Controls preview,
+> GKE Standard 512 Pods per node 지원입니다. preview 항목은 본문에 따로 표시했습니다.
+
+## 결론부터 말하면
+
+이번 주 동향은 **자동화가 강해질수록 실행 직전 인증, 런타임 전환, 초기 지연, agent 권한 경계를 더 명시해야 한다**는
+방향으로 묶입니다.
+
+GitHub Actions는 JavaScript action 실행 기준을 Node 24로 전환했고, GitHub Enterprise Cloud는 high-impact action에
+fresh authentication을 요구하는 proof of presence preview를 공개했습니다. AWS SDK for Java 2.x는 첫 호출 지연을
+startup 단계로 옮기는 warm-up 기능을 소개했습니다. Google Cloud는 agent tool call 거버넌스와 GKE node density를
+동시에 넓혔습니다.
+
+Spring Boot 팀이 볼 지점은 단순한 버전 업데이트가 아닙니다. CI action, 관리자 콘솔, AWS client, agent 플랫폼, GKE
+capacity는 모두 운영 계약입니다. "자동으로 된다"는 문장 뒤에 어떤 런타임, 인증, warming, network perimeter, IP 계획이
+있는지 남겨야 합니다.
+
+## 이번 주에 확인한 큰 흐름
+
+| 영역 | 공식 발표 | Spring Boot 팀이 볼 지점 |
+|---|---|---|
+| CI 런타임 | GitHub Actions에서 Node 20 제거 | third-party action과 self-hosted runner OS를 점검합니다. |
+| 계정 보안 | GitHub proof of presence public preview | 민감 작업은 유효 session만으로 충분한지 다시 봅니다. |
+| Java cold start | AWS SDK for Java 2.x client warm-up | 첫 요청 지연을 startup health gate 안으로 옮길 수 있습니다. |
+| Agent 거버넌스 | Google Cloud semantic governance policy와 VPC Service Controls preview | agent tool call도 data exfiltration perimeter로 봅니다. |
+| Kubernetes 밀도 | GKE Standard 512 Pods per node | Pod CIDR, IP capacity, 장애 blast radius를 같이 계산합니다. |
+
+직전 기술동향 글은 OpenAI Agents API, Node.js Current, Vercel AI Gateway, Docker Build Cloud를 다뤘습니다. 이번 글은
+같은 OpenAI, Node.js release, Vercel, Docker 축을 반복하지 않고 GitHub Actions와 enterprise security, AWS Java SDK,
+Google Cloud agent governance와 GKE로 범위를 옮겼습니다.
+
+<Mermaid title="2026년 9월 다섯째 주 기술 동향 흐름">
+{`flowchart LR
+  Official["공식 발표<br/>2026-09-23 ~ 2026-09-29"] --> Runtime["CI runtime 전환"]
+  Official --> Auth["고위험 작업 재인증"]
+  Official --> Java["Java SDK warm-up"]
+  Official --> Agent["Agent 정책 경계"]
+  Official --> GKE["Pod density 확대"]
+
+  Runtime --> Ops["운영 계약"]
+  Auth --> Ops
+  Java --> Ops
+  Agent --> Ops
+  GKE --> Ops
+
+  Ops --> Evidence["버전과 증적"]
+  Ops --> Boundary["권한과 네트워크 경계"]
+  Ops --> Capacity["지연과 용량 계획"]
+`}
+</Mermaid>
+
+## 1. GitHub Actions는 JavaScript action 실행 기준을 Node 24로 옮겼습니다
+
+GitHub는 2026년 9월 23일 Node 20이 GitHub Actions runner에서 더 이상 제공되지 않는다고 공지했습니다. JavaScript
+action은 이제 Node 24를 사용하고, 임시 opt-out이었던 `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION`도 더 이상 사용할 수
+없습니다.
+
+이 변화는 `actions/checkout` 같은 first-party action만 보는 문제가 아닙니다. 조직 내부에서 만든 JavaScript action이나
+오래된 third-party action이 `runs.using: node20`에 머물러 있으면 CI가 실패할 수 있습니다. GitHub 공지는 action
+maintainer에게 `node24`로 `runs.using` 값을 올려 새 release를 publish하라고 안내합니다.
+
+| 확인할 곳 | 질문 | 조치 |
+|---|---|---|
+| `.github/actions/**/action.yml` | 내부 JavaScript action이 Node 20을 쓰는가 | `runs.using: node24` 지원 release를 냅니다. |
+| workflow의 third-party action | 최신 release가 Node 24를 지원하는가 | pin을 올리고 changelog를 남깁니다. |
+| self-hosted runner | OS와 architecture가 Node 24를 지원하는가 | macOS 13.4 이하, ARM32 같은 제외 조건을 확인합니다. |
+| 실패 증적 | 어떤 action에서 runtime mismatch가 났는가 | job log와 action version을 함께 기록합니다. |
+
+Spring Boot 팀도 frontend build, Docker build, deployment, release note 생성이 GitHub Actions 위에 있다면 이 변경의
+영향을 받습니다. 애플리케이션 Java 버전과 별개로 CI action runtime은 별도의 운영 dependency입니다.
+
+## 2. GitHub proof of presence는 민감 작업에 fresh authentication을 요구합니다
+
+GitHub는 2026년 9월 24일 GitHub Enterprise Cloud의 proof of presence public preview를 발표했습니다. 관리형 사용자
+enterprise와 Microsoft Entra ID 기반 SSO를 쓰는 조직에서, token 생성, webhook 변경, 보안 설정 변경 같은 high-impact
+action 전에 interactive re-authentication 또는 MFA challenge를 요구할 수 있습니다.
+
+핵심은 "로그인되어 있음"과 "지금 이 민감 작업을 실제 사용자가 승인함"을 분리한다는 점입니다. GitHub는 탈취된 session
+cookie와 오래 사는 token이 공급망 공격에 쓰인 사례를 배경으로 설명합니다.
+
+Spring Boot 팀 관점에서는 관리자 기능에도 같은 질문을 던질 수 있습니다.
+
+```java
+record SensitiveActionRequest(
+    String actorId,
+    String action,
+    String proofOfPresenceId
+) {}
+```
+
+관리자 계정으로 로그인했더라도, secret rotation, webhook endpoint 변경, production deploy 승인, 결제 설정 변경은 추가
+확인을 요구할 수 있습니다. 중요한 것은 MFA 화면을 하나 더 붙이는 것이 아니라, audit log에 fresh authentication 시각과
+정책을 남기는 것입니다.
+
+## 3. AWS SDK for Java warm-up은 첫 호출 지연을 startup으로 옮깁니다
+
+AWS는 2026년 9월 25일 AWS SDK for Java 2.x의 SDK client warm-up 기능을 소개했습니다. `SdkWarmUp.warmUp()`은 service
+client와 HTTP client의 request path를 startup 시점에 미리 지나가게 해서 첫 service call 지연을 줄입니다. 이 기능은
+AWS SDK for Java `2.54.0` 이상에서 `sdk-core` module에 포함됩니다.
+
+공식 글은 local-only operation으로 marshalling과 unmarshalling 경로를 준비하고, unsigned network call로 DNS, TLS,
+certificate chain validation, connection setup 경로를 준비한다고 설명합니다. AWS credentials나 service permission은
+필요하지 않고 service operation 비용도 발생하지 않습니다.
+
+```java
+import software.amazon.awssdk.core.warmup.SdkWarmUp;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
+import software.amazon.awssdk.services.s3.S3Client;
+
+class AwsClientWarmup {
+    void warmup() {
+        SdkWarmUp.warmUp(S3Client.class, DynamoDbClient.class);
+    }
+}
+```
+
+운영 판단은 "무조건 켠다"가 아닙니다. warm-up은 첫 요청 지연을 줄이는 대신 startup 시간을 늘릴 수 있습니다. Spring Boot
+서비스라면 load balancer health check가 열리기 전, Lambda SnapStart라면 snapshot을 뜨기 전 어느 시점에 실행할지 정해야
+합니다. 또한 classpath 전체 warm-up은 쓰지 않는 client까지 데울 수 있으므로 필요한 client만 지정하는 편이 낫습니다.
+
+## 4. Google Cloud는 agent tool call도 네트워크 경계 안에 넣기 시작했습니다
+
+Google Cloud release notes는 2026년 9월 25일 Gemini Enterprise Agent Platform의 semantic governance policy와 policy
+engine이 VPC Service Controls를 preview로 지원한다고 공지했습니다. 설명의 초점은 agent tool call을 governance할 때
+data exfiltration 위험을 줄이기 위해 service perimeter 안에 포함할 수 있다는 점입니다.
+
+agent가 API key, document store, ticket, code repository, browser automation tool을 부르면, 이제 "사용자가 클릭했다"보다
+더 복잡한 권한 경로가 생깁니다. agent의 tool call도 네트워크와 데이터 경계 안에서 추적되어야 합니다.
+
+Spring Boot 팀이 내부 agent를 붙일 때 최소로 남길 계약은 다음과 같습니다.
+
+- agent가 호출할 수 있는 tool 목록과 승인 조건
+- tool call이 접근할 수 있는 project, VPC, data store 범위
+- prompt injection과 data exfiltration 방어 정책
+- 사람이 승인한 action과 agent가 자동 수행한 action의 분리
+- 실패 시 rollback과 감사 log 위치
+
+preview 기능이므로 바로 표준으로 삼기보다, agent 플랫폼을 설계할 때 "tool call은 네트워크 밖의 예외"가 아니라는 방향만
+먼저 반영하는 것이 좋습니다.
+
+## 5. GKE Standard 512 Pods per node는 IP 계획과 blast radius를 같이 키웁니다
+
+Google Cloud는 2026년 9월 25일 GKE Standard cluster가 node당 최대 512 Pods를 지원한다고 공지했습니다. 기존 256에서
+늘어난 값이며, 257에서 512 Pods로 구성한 node는 `/22` Pod CIDR block, 즉 1,024개 IP address를 할당받습니다.
+
+node density 확대는 비용과 운영 효율을 높일 수 있지만, 공짜 용량은 아닙니다. 한 node에 더 많은 Pod를 몰면 node 장애
+하나의 영향 범위도 커지고, IP 계획과 autoscaling 기준도 바뀝니다.
+
+| 검토 항목 | 왜 중요한가 |
+|---|---|
+| Pod CIDR | node당 `/22` 할당이 cluster 전체 IP 계획과 맞는지 봅니다. |
+| 장애 범위 | node 하나가 내려갈 때 동시에 사라지는 Pod 수가 늘어납니다. |
+| kubelet와 CNI | 노드 밀도 상승이 network policy, log, metric 수집에 주는 부하를 봅니다. |
+| Java service sizing | JVM heap, thread, connection pool이 작은 Pod 여러 개로 쪼개졌는지 확인합니다. |
+
+Spring Boot workload가 작은 Pod로 많이 쪼개져 있다면 node density는 매력적입니다. 하지만 "더 많이 올릴 수 있다"와
+"더 안정적으로 운영된다"는 같은 말이 아닙니다. Pod disruption budget, topology spread, autoscaler 정책을 같이 확인해야
+합니다.
+
+## 본문에 넣지 않은 후보와 제외 이유
+
+- GitHub Copilot의 Claude Sonnet 5.5, local sandboxing, Copilot Memory 발표는 화제성이 컸지만, 수요일 AI agent 편성과
+  더 잘 맞고 이번 글에서는 CI와 enterprise security 축을 우선했습니다.
+- OpenAI, Node.js release, Vercel AI Gateway, Docker Build Cloud는 직전 기술동향 글의 중심 주제였으므로 2회 연속 반복을
+  피했습니다.
+- Google Cloud Application Integration 보안 공지는 중요하지만 특정 서비스 patch 성격이 강해, 더 넓은 개발팀 운영 영향이
+  있는 proof of presence, agent governance, GKE density를 우선했습니다.
+- AWS CRT for JavaScript의 Node release schedule 정렬은 GitHub Actions Node 24 전환과 같은 런타임 정책 축이라 중복을
+  피하고 AWS SDK for Java warm-up을 선택했습니다.
+
+## 실무 체크리스트
+
+- [ ] 내부 JavaScript action의 `runs.using` 값을 확인하고 Node 24 지원 release로 고정한다.
+- [ ] third-party action은 tag만 올리지 말고 changelog와 runner 지원 OS를 함께 확인한다.
+- [ ] production webhook, token, organization security 설정에는 fresh authentication 요구를 검토한다.
+- [ ] AWS SDK warm-up은 startup latency와 first request latency를 따로 측정한 뒤 적용한다.
+- [ ] agent tool call은 allowed tools, network perimeter, audit log를 한 묶음으로 설계한다.
+- [ ] GKE node당 Pod 수를 올리기 전 Pod CIDR, PDB, topology spread, observability 부하를 계산한다.
+
+## 참고자료
+
+- [GitHub Changelog - Node 20 is no longer available in GitHub Actions](https://github.blog/changelog/2026-09-23-node-20-is-no-longer-available-in-github-actions/)
+- [GitHub Changelog - Require proof of presence for high-impact actions](https://github.blog/changelog/2026-09-24-require-proof-of-presence-for-high-impact-actions/)
+- [AWS Developer Tools Blog - Introducing SDK Client Warm-Up feature in the AWS SDK for Java 2.x](https://aws.amazon.com/blogs/developer/introducing-sdk-client-warm-up-feature-in-the-aws-sdk-for-java-2-x/)
+- [Google Cloud release notes](https://docs.cloud.google.com/release-notes)
+- [GitHub Changelog - CodeQL 2.27.1 adds C and C++ query and Kotlin 2.4.20 support](https://github.blog/changelog/2026-09-25-codeql-2-27-1-adds-c-and-c-query-and-kotlin-2-4-20-support/)

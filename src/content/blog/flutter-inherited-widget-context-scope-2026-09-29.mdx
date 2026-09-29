@@ -1,0 +1,262 @@
+---
+title: "Spring Boot 개발자를 위한 Flutter 열여덟째 걸음: InheritedWidget으로 context 범위 이해하기"
+description: "Spring Boot의 request scope, ApplicationContext, 설정 전파 감각과 비교하며 Flutter에서 InheritedWidget, BuildContext, Theme.of 같은 의존성 조회가 어떻게 동작하는지 정리합니다."
+publishedAt: 2026-09-29T00:03:00+09:00
+draft: false
+category: "Frontend"
+tags: ["Flutter", "Dart", "Spring Boot", "State", "InheritedWidget"]
+kind: "learning"
+heroImage: "../../assets/blog/flutter-inherited-widget-context-scope-2026-09-29/cover.webp"
+heroImageAlt: "Flutter 위젯 트리에서 InheritedWidget, BuildContext, Theme, MediaQuery 의존성이 아래 방향으로 전달되는 무텍스트 기술 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 모바일 앱 학습"
+lesson: 18
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 9월 29일 KST 기준으로 Flutter SDK archive JSON, Flutter `InheritedWidget`,
+> `InheritedModel`, `BuildContext` dependency lookup API 문서를 확인했습니다. SDK archive의
+> stable channel은 Flutter 3.47.5, Dart 3.13.4를 가리켰습니다. 이 글은 stable channel의 공개 API를 기준으로
+> 하며 beta, dev, main channel 기능을 안정 기능처럼 다루지 않았습니다.
+
+## 결론부터 말하면
+
+Flutter에서 `InheritedWidget`은 하위 widget들이 공통 값을 효율적으로 찾아 쓰게 해 주는 tree 기반 전파 장치입니다.
+`Theme.of(context)`, `MediaQuery.of(context)`, `DefaultTextStyle.of(context)` 같은 익숙한 API 뒤에도 이 계열의
+패턴이 있습니다.
+
+Spring Boot 개발자에게 비유하면, 전역 singleton을 아무 데서나 꺼내 쓰는 느낌보다는 **현재 요청이나 현재 component tree
+범위 안에서 가까운 설정을 조회하는 것**에 가깝습니다. 중요한 것은 값 자체보다 `BuildContext`가 가리키는 위치입니다.
+같은 코드라도 context가 provider 아래에 있느냐 위에 있느냐에 따라 결과가 달라집니다.
+
+## 이번 주 개념
+
+공식 `InheritedWidget` 문서는 이 class를 "정보를 tree 아래로 효율적으로 전파하는 base class"라고 설명합니다. 하위
+widget이 `dependOnInheritedWidgetOfExactType`로 값을 조회하면, Flutter는 그 dependency를 기록해 두었다가 inherited
+widget이 바뀔 때 해당 consumer를 다시 build할 수 있습니다.
+
+| Flutter 개념 | 역할 | Spring Boot에 비유하면 |
+|---|---|---|
+| `InheritedWidget` | 하위 tree에 공통 값을 제공 | 상위 configuration 또는 request-scoped context |
+| `BuildContext` | widget이 tree에서 있는 위치 | bean을 찾는 container 위치와 request boundary |
+| `of(context)` | 가까운 inherited value 조회 | 현재 scope에서 필요한 dependency 조회 |
+| `updateShouldNotify` | consumer rebuild 여부 결정 | 설정 변경 이벤트를 누구에게 알릴지 고르는 조건 |
+| `InheritedModel` | 값의 일부 aspect만 구독 | 큰 설정 객체 안에서 필요한 부분만 감시 |
+
+<Mermaid title="InheritedWidget과 context 범위">
+{`flowchart TD
+  Root["App root"] --> Theme["Theme inherited value"]
+  Theme --> Shell["Screen shell"]
+  Shell --> Provider["OrderScope inherited value"]
+  Provider --> List["OrderList"]
+  Provider --> Detail["OrderDetail"]
+  Shell --> Outside["Sibling widget"]
+
+  List --> Lookup["OrderScope.of(context)"]
+  Detail --> Lookup
+  Outside --> Miss["OrderScope를 찾지 못함"]
+  Theme --> Rebuild["Theme 변경 시 의존 consumer rebuild"]
+  Provider --> Scoped["OrderScope 변경 시 하위 consumer만 rebuild"]
+`}
+</Mermaid>
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Spring에서는 객체를 직접 만들지 않고 container에서 주입받습니다.
+
+```java
+@Service
+class OrderService {
+    private final OrderPolicy policy;
+
+    OrderService(OrderPolicy policy) {
+        this.policy = policy;
+    }
+}
+```
+
+이때 `OrderPolicy`가 어디에서 왔는지, 어떤 profile이나 scope가 적용됐는지는 container 경계가 결정합니다. 테스트에서는
+다른 bean을 넣을 수 있고, 요청마다 다른 값을 쓰는 request scope도 만들 수 있습니다.
+
+Flutter도 비슷하게 "필요한 값을 가까운 범위에서 찾는다"는 감각이 있습니다. 다만 Flutter에는 Spring container가 없습니다.
+대신 widget tree가 범위가 됩니다. `Theme.of(context)`는 전역 theme singleton을 읽는 것이 아니라, 현재 context 위쪽에서
+가장 가까운 `Theme` 계열 inherited value를 찾습니다.
+
+## Flutter에서는 무엇이 다른가
+
+`BuildContext`는 단순 parameter가 아닙니다. context는 "이 widget이 tree 어디에 있는가"를 나타내는 손잡이입니다.
+그래서 provider를 만든 바로 그 build method의 바깥 context로 값을 조회하면 실패할 수 있습니다.
+
+아래 예제에서 `OrderScope.of(context)`는 `OrderScope`보다 위쪽 context를 사용하므로 찾을 수 없습니다.
+
+```dart
+class OrderPage extends StatelessWidget {
+  const OrderPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return OrderScope(
+      repository: OrderRepository(),
+      child: Text(
+        OrderScope.of(context).repository.name,
+      ),
+    );
+  }
+}
+```
+
+`Builder`로 하위 context를 새로 만들면 조회 범위가 provider 아래로 내려갑니다.
+
+```dart
+class OrderPage extends StatelessWidget {
+  const OrderPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return OrderScope(
+      repository: OrderRepository(),
+      child: Builder(
+        builder: (innerContext) {
+          final scope = OrderScope.of(innerContext);
+          final repository = scope.repository;
+          return Text(repository.name);
+        },
+      ),
+    );
+  }
+}
+```
+
+Spring에서 아직 생성되지 않은 child context의 bean을 parent context에서 찾으려는 것과 비슷한 실수입니다. Flutter에서는
+이 문제가 runtime assertion으로 나타나는 경우가 많습니다.
+
+## 최소 실행 예제: 작은 scope 직접 만들기
+
+`InheritedWidget`을 직접 만들 일은 매일 생기지 않습니다. 그래도 원리를 알면 `Theme`, `MediaQuery`, `Provider`,
+`Riverpod` 같은 도구가 왜 context와 scope를 강조하는지 이해하기 쉬워집니다.
+
+```dart
+class OrderRepository {
+  const OrderRepository(this.endpoint);
+
+  final String endpoint;
+}
+
+class OrderScope extends InheritedWidget {
+  const OrderScope({
+    super.key,
+    required this.repository,
+    required super.child,
+  });
+
+  final OrderRepository repository;
+
+  static OrderScope? maybeOf(
+    BuildContext context,
+  ) {
+    return context
+        .dependOnInheritedWidgetOfExactType<
+          OrderScope
+        >();
+  }
+
+  static OrderScope of(
+    BuildContext context,
+  ) {
+    final scope = maybeOf(context);
+    assert(scope != null);
+    return scope!;
+  }
+
+  @override
+  bool updateShouldNotify(
+    OrderScope oldWidget,
+  ) {
+    return repository != oldWidget.repository;
+  }
+}
+```
+
+사용하는 쪽은 repository를 생성하지 않습니다. 현재 tree 범위에서 찾아 쓸 뿐입니다.
+
+```dart
+class OrderText extends StatelessWidget {
+  const OrderText({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final scope = OrderScope.of(context);
+    final endpoint = scope.repository.endpoint;
+    return Text('Endpoint: $endpoint');
+  }
+}
+```
+
+작은 앱에서는 생성자 parameter로 넘기는 편이 더 단순합니다. 하지만 theme, locale, router, auth session, feature flag처럼
+많은 하위 widget이 같은 값을 읽어야 한다면 inherited scope가 자연스러워집니다.
+
+## `updateShouldNotify`는 rebuild 계약입니다
+
+`updateShouldNotify`는 값이 바뀌었을 때 dependent widget들을 다시 build할지 결정합니다. 항상 `true`를 반환하면 단순하지만
+불필요한 rebuild가 늘 수 있습니다. 항상 `false`를 반환하면 값이 바뀌어도 화면이 갱신되지 않을 수 있습니다.
+
+```dart
+@override
+bool updateShouldNotify(
+  OrderScope oldWidget,
+) {
+  return repository.endpoint !=
+      oldWidget.repository.endpoint;
+}
+```
+
+Spring에서 cache invalidation 조건을 너무 넓게 잡으면 매 요청이 느려지고, 너무 좁게 잡으면 오래된 값을 보듯이, Flutter도
+알림 조건을 데이터 성격에 맞춰 잡아야 합니다.
+
+| 값의 성격 | 추천 방식 | 이유 |
+|---|---|---|
+| 거의 변하지 않는 설정 | 생성자 주입 또는 작은 inherited scope | 읽기 쉽고 rebuild 부담이 작음 |
+| 자주 바뀌는 카운터 | listenable builder, state management | 작은 영역만 다시 그림 |
+| theme, locale, media query | framework 제공 `of(context)` API | 이미 최적화된 scope 사용 |
+| 큰 object 일부만 변경 | `InheritedModel` 또는 selector | 필요한 aspect만 갱신 |
+
+## `InheritedModel`은 일부만 구독할 때 씁니다
+
+공식 `InheritedModel` 문서는 dependents가 model 전체가 아니라 특정 aspect에 의존할 수 있다고 설명합니다. 예를 들어 하나의
+`DashboardState` 안에 `orders`, `alerts`, `profile`이 모두 들어 있다면, 주문 수만 보는 widget이 profile 변경 때마다
+다시 build될 필요는 없습니다.
+
+다만 처음부터 `InheritedModel`을 꺼낼 필요는 없습니다. 대부분의 앱에서는 작은 state object로 나누거나, 이미 사용하는
+state management 도구의 selector를 쓰는 편이 더 단순합니다. 원리는 같습니다. **큰 값 하나를 모두 구독하지 말고 필요한
+부분만 구독한다**는 것입니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫 번째 오해는 `BuildContext`를 어디서나 보관해도 된다는 생각입니다. context는 tree 위치와 생명주기를 품고 있으므로 오래
+살아야 하는 service나 repository에 저장하지 않는 편이 안전합니다.
+
+두 번째 오해는 inherited scope를 service locator처럼 쓰는 것입니다. 모든 객체를 `of(context)`로 꺼내면 dependency가
+숨습니다. 화면 구조와 함께 움직이는 값에만 쓰고, 화면과 무관한 domain service는 명시적으로 조립하는 편이 낫습니다.
+
+세 번째 오해는 `InheritedWidget`을 직접 만들어야 고급 Flutter라는 생각입니다. 실제 앱에서는 `Theme`, `MediaQuery`,
+`Provider`, `Riverpod`처럼 검증된 계층을 쓰는 경우가 더 많습니다. 직접 구현은 원리를 이해하기 위한 작은 실습으로 충분합니다.
+
+## 연습 문제
+
+1. 현재 Flutter 예제에서 `Theme.of(context)`, `MediaQuery.of(context)`, `Navigator.of(context)`를 찾습니다.
+2. 각 호출의 context가 해당 provider 아래에 있는지 tree를 그려 봅니다.
+3. 화면 전체에서 쓰는 설정값 하나를 생성자 parameter로 넘기는 방식과 inherited scope로 넘기는 방식을 비교합니다.
+4. `updateShouldNotify`를 `true`, `false`, 값 비교 방식으로 바꿨을 때 어떤 consumer가 다시 build되는지 기록합니다.
+5. 큰 상태 객체를 하나 만들었다면, 어떤 field가 자주 바뀌고 어떤 field가 거의 바뀌지 않는지 나눠 봅니다.
+
+## 참고자료
+
+- [Flutter SDK archive](https://docs.flutter.dev/install/archive)
+- [Flutter release archive JSON - Linux](https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json)
+- [Flutter API - InheritedWidget](https://api.flutter.dev/flutter/widgets/InheritedWidget-class.html)
+- [Flutter API - InheritedModel](https://api.flutter.dev/flutter/widgets/InheritedModel-class.html)
+- [Flutter API - BuildContext dependency lookup](https://api.flutter.dev/flutter/widgets/BuildContext/dependOnInheritedWidgetOfExactType.html)
