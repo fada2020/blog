@@ -1,0 +1,246 @@
+---
+title: "Spring Boot 개발자를 위한 Kotlin 열일곱째 걸음: in/out 제네릭으로 API 경계 좁히기"
+description: "Java wildcard에 익숙한 개발자를 위해 Kotlin declaration-site variance, use-site projection, @JvmSuppressWildcards의 실무 판단 기준을 정리합니다."
+publishedAt: 2026-10-01T08:50:00+09:00
+draft: false
+category: "Backend"
+tags: ["Kotlin", "Generics", "Variance", "Spring Boot", "Java Interop"]
+kind: "learning"
+heroImage: "../../assets/blog/kotlin-generics-variance-boundary-2026-10-01/cover.webp"
+heroImageAlt: "Kotlin in out 제네릭과 Java Spring API 경계를 비교하는 무텍스트 백엔드 학습 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 Kotlin 학습"
+lesson: 17
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 10월 1일에 Kotlin release process, Kotlin 2.4.20 릴리스 노트, Kotlin generics 문서,
+> Java interop 문서와 Spring Framework Kotlin requirements 문서를 확인했습니다. 기준 안정 버전은
+> `Kotlin 2.4.20`입니다. 이 글은 JVM 서버 코드 기준이며, Beta/EAP 기능을 안정 기능처럼 다루지 않습니다.
+
+## 결론부터 말하면
+
+Kotlin의 `out`과 `in`은 Java의 `? extends`, `? super`를 더 읽기 쉬운 위치에 옮긴 장치입니다.
+Spring Boot 개발자에게 중요한 질문은 "문법을 어떻게 외우나"가 아니라 "이 API가 값을 꺼내 주는 쪽인가,
+값을 받아들이는 쪽인가"입니다.
+
+실무 기준은 단순합니다.
+
+- 읽기 전용 결과 모델은 `out T`로 내보냅니다.
+- 명령이나 이벤트를 소비하는 포트는 `in T`로 받습니다.
+- 양방향으로 읽고 쓰는 저장소는 무리해서 variance를 붙이지 않습니다.
+- Java 호출자가 쓰는 public API는 생성되는 wildcard 모양까지 확인합니다.
+- `@JvmSuppressWildcards`는 Java 사용성이 실제로 나쁠 때만 좁게 씁니다.
+
+## 이번 주 개념
+
+Kotlin 공식 문서는 type parameter가 생산자 역할이면 `out`, 소비자 역할이면 `in`을 쓴다고 설명합니다.
+리스트를 떠올리면 쉽습니다. `List<out T>`처럼 읽기 전용 컬렉션은 `T`를 꺼내 주는 생산자입니다.
+반대로 어떤 sink가 `T`를 받아 저장하거나 전송한다면 소비자입니다.
+
+```kotlin
+interface Page<out T> {
+    val items: List<T>
+    val totalCount: Long
+}
+
+interface CommandHandler<in C> {
+    fun handle(command: C)
+}
+```
+
+`Page<MemberSummary>`는 더 구체적인 결과를 안전하게 내보냅니다. `CommandHandler<CreateMemberCommand>`는
+명령을 받는 쪽입니다. 둘 다 Spring MVC controller, service, event handler 경계에서 자주 만나는 모양입니다.
+
+<Mermaid title="Kotlin variance 판단 흐름">
+{`flowchart LR
+  Boundary["Generic API boundary"] --> Role{"T's role"}
+  Role --> Producer["Only returns T"]
+  Role --> Consumer["Only accepts T"]
+  Role --> Both["Returns and accepts T"]
+  Producer --> Out["Use out T"]
+  Consumer --> In["Use in T"]
+  Both --> Invariant["Keep invariant"]
+  Out --> JavaInterop{"Public Java callers?"}
+  In --> JavaInterop
+  JavaInterop -->|yes| Wildcard["Inspect generated wildcards"]
+  JavaInterop -->|painful call site| Suppress["@JvmSuppressWildcards narrowly"]
+`}
+</Mermaid>
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Java에서는 wildcard를 호출 지점에 자주 씁니다.
+
+```java
+interface MemberExporter {
+    void export(List<? extends MemberView> rows);
+}
+
+interface CommandBus {
+    void register(Handler<? super CreateMemberCommand> handler);
+}
+```
+
+읽는 쪽에는 `? extends`, 쓰는 쪽에는 `? super`를 붙입니다. 하지만 wildcard가 여러 계층으로 들어가면
+controller, service, mapper 사이의 타입 오류가 길고 어렵게 보입니다. "내가 무엇을 생산하고 소비하는지"보다
+`capture of ? extends ...` 같은 컴파일 메시지를 먼저 읽게 됩니다.
+
+Kotlin은 선언 지점에서 의도를 드러낼 수 있습니다.
+
+```kotlin
+interface ExportRows<out T> {
+    fun rows(): List<T>
+}
+
+interface Handler<in C> {
+    fun handle(command: C)
+}
+```
+
+이렇게 하면 API를 보는 사람이 이 타입이 생산자인지 소비자인지 먼저 알 수 있습니다.
+
+## Kotlin에서는 무엇이 다른가
+
+`out T`는 이 타입이 `T`를 밖으로 내보낸다는 뜻입니다. 그래서 `T`를 parameter로 받는 함수에는 쓸 수 없습니다.
+
+```kotlin
+interface QueryResult<out T> {
+    fun first(): T?
+}
+```
+
+`in T`는 이 타입이 `T`를 안으로 받는다는 뜻입니다. 그래서 `T`를 반환 타입으로 내보내기 어렵습니다.
+
+```kotlin
+interface DomainEventPublisher<in E> {
+    fun publish(event: E)
+}
+```
+
+양쪽을 모두 해야 하는 타입은 invariant로 두는 편이 낫습니다.
+
+```kotlin
+interface MutablePort<T> {
+    fun get(id: String): T?
+    fun save(value: T)
+}
+```
+
+여기서 억지로 `out`이나 `in`을 붙이면 API가 실제 역할과 어긋납니다. 특히 repository는 읽기와 쓰기를 동시에 하므로
+variance가 아니라 command/query interface 분리가 더 좋은 답일 때가 많습니다.
+
+## 대응 개념 비교
+
+| Java/Spring 습관 | Kotlin 표현 | 판단 기준 |
+|---|---|---|
+| `List<? extends T>` | `List<out T>` 또는 `interface Box<out T>` | 값을 꺼내기만 할 때 |
+| `Consumer<? super T>` | `interface Handler<in T>` | 값을 받기만 할 때 |
+| 읽기/쓰기 repository | invariant `Repository<T>` | 양방향이면 단순하게 둠 |
+| wildcard가 긴 public API | JVM wildcard 보정 | Java 호출성이 실제로 나쁠 때만 |
+| raw type 회피 | 명시적 타입 parameter | DTO와 domain type을 섞지 않음 |
+
+Spring Framework Kotlin requirements 문서는 Kotlin 사용 시 `kotlin-stdlib`과 `kotlin-reflect`가 classpath에 있어야
+한다고 설명합니다. Spring Boot API 경계에서 Kotlin 타입을 제대로 쓰려면 런타임 설정보다 먼저 타입의 역할을 분리해야 합니다.
+
+## 최소 실행 예제
+
+아래 예제는 조회 결과와 명령 처리 포트를 분리합니다. `Page<out T>`는 결과를 내보내고,
+`CommandHandler<in C>`는 명령을 받습니다.
+
+```kotlin
+data class MemberSummary(
+    val id: String,
+    val email: String,
+)
+
+data class AdminMemberSummary(
+    val id: String,
+    val email: String,
+    val roleNames: List<String>,
+)
+
+interface Page<out T> {
+    val items: List<T>
+    val totalCount: Long
+}
+
+data class SimplePage<out T>(
+    override val items: List<T>,
+    override val totalCount: Long,
+) : Page<T>
+
+data class CreateMemberCommand(
+    val email: String,
+)
+
+interface CommandHandler<in C> {
+    fun handle(command: C)
+}
+
+class AuditHandler : CommandHandler<CreateMemberCommand> {
+    override fun handle(command: CreateMemberCommand) {
+        println("audit ${command.email}")
+    }
+}
+
+fun renderMembers(page: Page<MemberSummary>) {
+    page.items.forEach { println("${it.id} ${it.email}") }
+}
+
+fun submit(command: CreateMemberCommand, handler: CommandHandler<CreateMemberCommand>) {
+    handler.handle(command)
+}
+
+fun main() {
+    val admins: Page<AdminMemberSummary> = SimplePage(
+        items = listOf(AdminMemberSummary("1", "admin@example.com", listOf("ADMIN"))),
+        totalCount = 1,
+    )
+
+    renderMembers(admins)
+    submit(CreateMemberCommand("user@example.com"), AuditHandler())
+}
+```
+
+`Page`가 `out T`이기 때문에 `Page<AdminMemberSummary>`를 `Page<MemberSummary>`가 필요한 곳에 넘길 수 있습니다.
+반대로 `CommandHandler`는 명령을 받는 쪽이므로 처리 대상의 상하위 관계를 설계할 때 `in`이 의미를 가집니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫째, `out`은 "출력 parameter"라는 뜻이 아닙니다. 타입 parameter가 API 밖으로 생산된다는 뜻입니다.
+HTTP response DTO, projection, read model에 잘 맞습니다.
+
+둘째, `in`은 "입력 DTO는 전부 붙인다"는 뜻이 아닙니다. 그 타입이 오직 소비될 때만 붙입니다.
+명령 handler, event sink, validator처럼 값을 받아 처리하고 반환하지 않는 경계가 후보입니다.
+
+셋째, Java interop annotation을 먼저 붙이면 안 됩니다. Kotlin 공식 Java interop 문서는 wildcard 생성과
+`@JvmSuppressWildcards`를 설명하지만, 이것은 Java 호출 모양을 맞추기 위한 장치입니다. Kotlin 내부 설계를
+우회하는 기본값이 아닙니다.
+
+넷째, variance는 계층형 DTO 설계를 대신하지 않습니다. `AdminMemberSummary : MemberSummary` 같은 상속이
+진짜 도메인 관계를 뜻하지 않는다면, variance로 통과시키기보다 별도 view model을 두는 편이 안전합니다.
+
+## 연습 문제
+
+1. `interface EventSink<in E>`를 만들고 `publish(E)`만 노출해 보세요.
+2. `interface Slice<out T>`를 만들고 `items`, `nextCursor`만 반환하게 해 보세요.
+3. 읽기와 쓰기를 모두 하는 `Repository<T>`에서 query port와 command port를 분리할 수 있는지 표시해 보세요.
+4. Java에서 호출해야 하는 API 하나를 골라 Kotlin bytecode의 wildcard가 호출성을 해치는지 확인해 보세요.
+
+## 참고자료
+
+- [Kotlin release process](https://kotlinlang.org/docs/releases.html) -
+  2026년 10월 1일 확인, 최신 안정 버전 `2.4.20` 기준
+- [What's new in Kotlin 2.4.20](https://kotlinlang.org/docs/whatsnew2420.html) -
+  2026년 10월 1일 확인, 안정 릴리스와 pre-stable 기능 구분
+- [Kotlin generics: in, out, where](https://kotlinlang.org/docs/generics.html) -
+  2026년 10월 1일 확인, declaration-site variance와 use-site projection 기준
+- [Calling Kotlin from Java](https://kotlinlang.org/docs/java-to-kotlin-interop.html) -
+  2026년 10월 1일 확인, variant generics와 `@JvmSuppressWildcards` 기준
+- [Spring Framework Kotlin requirements](https://docs.spring.io/spring/reference/languages/kotlin/requirements.html) -
+  2026년 10월 1일 확인, Spring Kotlin classpath 요구사항 기준

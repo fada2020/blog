@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /샌드박스, 메모리, 관측성으로 에이전트 라우팅하기/ })
+    .getByRole("link", { name: /저장 위치와 적용 범위를 분리해야 합니다/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/ai-agent-sandbox-memory-observability-2026-09-30\/$/,
+    /\/blog\/posts\/configuration-source-boundary-retrospective-2026-10-01\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "AI agent 실전 운영: 샌드박스, 메모리, 관측성으로 에이전트 라우팅하기",
+    "설정 관리 회고: 저장 위치와 적용 범위를 분리해야 합니다",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "여러 AI agent 실행 경로가 샌드박스, 메모리, 관측성, 모델 라우터로 나뉘는 무텍스트 기술 다이어그램",
+    "DB 설정, SSM Parameter, Jenkins 파라미터, Credentials가 승인과 검증 경계를 거쳐 적용되는 무텍스트 운영 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /샌드박스, 메모리, 관측성으로 에이전트 라우팅하기/,
+      name: /저장 위치와 적용 범위를 분리해야 합니다/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Spring Boot 개발자를 위한 Flutter 열아홉째 걸음/,
+      name: /Spring Boot 개발자를 위한 Kotlin 열일곱째 걸음/,
     }),
   ).toBeVisible();
 });
