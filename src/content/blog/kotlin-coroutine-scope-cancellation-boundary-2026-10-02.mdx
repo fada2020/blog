@@ -1,0 +1,291 @@
+---
+title: "Spring Boot 개발자를 위한 Kotlin 열여덟째 걸음: CoroutineScope로 취소 경계 세우기"
+description: "Java ExecutorService와 Spring 비동기 처리에 익숙한 개발자를 위해 Kotlin CoroutineScope, structured concurrency, cancellation 전파를 서버 경계에서 읽는 법을 정리합니다."
+publishedAt: 2026-10-02T08:50:00+09:00
+draft: false
+category: "Backend"
+tags: ["Kotlin", "Coroutines", "Structured Concurrency", "Spring Boot", "Concurrency"]
+kind: "learning"
+heroImage: "../../assets/blog/kotlin-coroutine-scope-cancellation-boundary-2026-10-02/cover.webp"
+heroImageAlt: "Kotlin CoroutineScope와 Java ExecutorService의 취소 경계가 요청, 작업, 자식 코루틴으로 나뉘는 무텍스트 백엔드 학습 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 Kotlin 학습"
+lesson: 18
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 10월 2일에 Kotlin release process, Kotlin 2.4.20 릴리스 노트,
+> Kotlin coroutines basics, coroutine context and dispatchers, coroutine exception handling,
+> `kotlinx.coroutines` `CoroutineScope` API 문서를 확인했습니다. 기준 안정 버전은
+> `Kotlin 2.4.20`입니다. `StackTraceRecoverable` 같은 2.4.20의 coroutine 관련 새 API 중
+> Experimental 표기가 있는 기능은 운영 기본값처럼 설명하지 않습니다.
+
+## 결론부터 말하면
+
+Kotlin coroutine을 Spring Boot 서버 코드에 들일 때 첫 질문은 "몇 개를 동시에 돌릴까"가 아닙니다.
+더 중요한 질문은 **이 작업을 누가 취소할 수 있고, 실패가 어디까지 전파되어야 하는가**입니다.
+
+Java `ExecutorService`에 익숙하면 백그라운드 작업을 제출하고 `Future`를 들고 있는 방식이 자연스럽습니다.
+Kotlin에서는 `CoroutineScope`가 그 역할의 중심에 옵니다. Scope는 coroutine들의 생명주기 묶음이고,
+structured concurrency는 부모 작업이 자식 작업을 기다리고 취소를 전파하도록 만듭니다.
+
+실무 기준은 단순합니다.
+
+- 요청 안에서 끝나야 하는 작업은 요청 scope 안에 둡니다.
+- 실패해도 요청을 막지 않는 부가 작업은 별도 queue나 명시된 application scope로 보냅니다.
+- `GlobalScope`로 흘려보내는 코드는 운영에서 추적, 취소, 테스트가 어려워집니다.
+- timeout은 예외 처리가 아니라 업무 약속입니다.
+- `CancellationException`은 삼켜서 정상 실패처럼 바꾸지 않습니다.
+
+## 이번 주 개념
+
+Kotlin 공식 문서는 coroutine을 suspend 가능한 computation으로 설명합니다. thread를 점유한 채 기다리는 대신
+중단했다가 다시 이어서 실행할 수 있습니다. 하지만 coroutine이 가볍다는 사실만 보면 설계를 놓칩니다.
+
+핵심은 `CoroutineScope`입니다.
+
+```kotlin
+suspend fun loadDashboard(userId: UserId): Dashboard =
+    coroutineScope {
+        val profile = async { userClient.fetchProfile(userId) }
+        val notices = async { noticeClient.fetchNotices(userId) }
+
+        Dashboard(
+            profile = profile.await(),
+            notices = notices.await(),
+        )
+    }
+```
+
+`coroutineScope` 블록은 내부 child coroutine이 끝날 때까지 완료되지 않습니다. 하나가 실패하거나 취소되면
+관련 child도 함께 정리됩니다. 이것이 structured concurrency의 좋은 출발점입니다.
+
+<Mermaid title="CoroutineScope 취소 경계">
+{`flowchart TD
+  Request["HTTP request"] --> Scope["request CoroutineScope"]
+  Scope --> Profile["profile async"]
+  Scope --> Notices["notices async"]
+  Profile --> Join["parent waits"]
+  Notices --> Join
+  Scope --> Failure{"child fails or timeout?"}
+  Failure -->|yes| Cancel["cancel sibling work"]
+  Failure -->|no| Response["build response"]
+  Request --> Audit{"fire and forget?"}
+  Audit -->|needed| Queue["queue or explicit app scope"]
+  Audit -->|avoid| Global["avoid GlobalScope leak"]
+`}
+</Mermaid>
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Java 서버 코드에서는 `ExecutorService`, `CompletableFuture`, Spring `@Async`가 자주 쓰였습니다.
+
+```java
+CompletableFuture<Member> member =
+    CompletableFuture.supplyAsync(() -> memberClient.fetch(id), executor);
+
+CompletableFuture<List<Order>> orders =
+    CompletableFuture.supplyAsync(() -> orderClient.fetchRecent(id), executor);
+
+return member.thenCombine(orders, Dashboard::new).join();
+```
+
+이 방식도 충분히 쓸 수 있습니다. 다만 실제 운영에서는 다음 질문이 자주 남습니다.
+
+- controller 요청이 끊겼을 때 두 작업도 취소되는가
+- 한 작업이 실패하면 나머지 작업은 계속 도는가
+- timeout을 어디서 걸었는가
+- thread pool 포화가 어느 요청의 책임인지 추적할 수 있는가
+- fire-and-forget 작업이 배포, 종료, 재시도 때 어떻게 정리되는가
+
+Kotlin coroutine은 이 질문을 코드 구조로 더 잘 드러내게 해 줍니다.
+
+## Kotlin에서는 무엇이 다른가
+
+Kotlin의 `launch`와 `async`는 그냥 "비동기 실행 버튼"이 아닙니다. `CoroutineScope` 안에서 시작되며,
+그 scope의 context와 parent-child 관계를 물려받습니다.
+
+```kotlin
+suspend fun refreshCache(keys: List<String>) = coroutineScope {
+    keys.map { key ->
+        async {
+            cacheClient.refresh(key)
+        }
+    }.awaitAll()
+}
+```
+
+이 함수는 모든 refresh가 끝나야 반환합니다. 중간에 실패하면 호출자에게 실패가 올라가고, 아직 실행 중인 child 작업도
+같은 작업 묶음으로 취소됩니다. "요청이 끝났는데 뒷일이 계속 도는" 상태를 줄이는 데 도움이 됩니다.
+
+반대로 이런 코드는 피해야 합니다.
+
+```kotlin
+fun refreshLater(key: String) {
+    GlobalScope.launch {
+        cacheClient.refresh(key)
+    }
+}
+```
+
+`GlobalScope`는 현재 요청, 서비스 작업, 테스트 lifecycle과 연결되지 않습니다. 운영에서는 "어디서 시작됐는지 모르는 일"이
+생기기 쉽습니다. 정말 요청 밖 작업이 필요하면 메시지 큐, scheduler, 또는 이름이 붙은 application-level scope를
+명시적으로 둡니다.
+
+## 대응 개념 비교
+
+| Java/Spring 습관 | Kotlin coroutine 표현 | 판단 기준 |
+|---|---|---|
+| `ExecutorService.submit()` | `CoroutineScope.launch` | 결과가 필요 없지만 lifecycle이 필요할 때 |
+| `CompletableFuture<T>` | `async` + `await` | 결과를 합쳐야 할 때 |
+| request timeout | `withTimeout` 또는 상위 timeout | 업무 시간 제한을 코드에 드러낼 때 |
+| `@Async` fire-and-forget | queue 또는 application scope | 요청 밖 작업의 책임자를 명시할 때 |
+| `Future.cancel()` 누락 | parent scope cancellation | 취소 전파가 중요할 때 |
+
+Spring Boot 개발자에게 좋은 기본값은 "controller에서 무조건 coroutine을 많이 만든다"가 아닙니다.
+외부 API를 병렬 조회해야 하는 읽기 endpoint, 요청 단위로 묶이는 batch성 validation, timeout이 명확한 조합 작업부터
+작게 적용하는 편이 안전합니다.
+
+## 최소 실행 예제
+
+아래 예제는 회원 요약과 알림 요약을 병렬로 읽되, 둘 중 하나가 실패하면 전체 요청을 실패시키는 구조입니다.
+
+```kotlin
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
+
+data class MemberSummary(
+    val id: String,
+    val email: String,
+)
+
+data class NoticeSummary(
+    val unreadCount: Int,
+)
+
+data class Dashboard(
+    val member: MemberSummary,
+    val notices: NoticeSummary,
+)
+
+class MemberClient {
+    suspend fun fetch(id: String): MemberSummary {
+        delay(80)
+        return MemberSummary(id, "user@example.com")
+    }
+}
+
+class NoticeClient {
+    suspend fun fetch(id: String): NoticeSummary {
+        delay(100)
+        return NoticeSummary(unreadCount = 3)
+    }
+}
+
+class DashboardService(
+    private val memberClient: MemberClient,
+    private val noticeClient: NoticeClient,
+) {
+    suspend fun load(id: String): Dashboard =
+        withTimeout(500) {
+            coroutineScope {
+                val member = async { memberClient.fetch(id) }
+                val notices = async { noticeClient.fetch(id) }
+
+                Dashboard(
+                    member = member.await(),
+                    notices = notices.await(),
+                )
+            }
+        }
+}
+```
+
+`withTimeout(500)`은 "500ms 안에 끝나야 하는 요청"이라는 업무 약속을 코드에 적습니다.
+`coroutineScope`는 내부 작업의 parent가 됩니다. `memberClient.fetch`가 실패하면 `noticeClient.fetch`가
+혼자 계속 도는 구조를 피할 수 있습니다.
+
+여러 결과를 리스트로 합칠 때는 `awaitAll()`로 더 짧게 쓸 수 있습니다.
+
+```kotlin
+suspend fun loadCards(ids: List<String>): List<MemberSummary> =
+    coroutineScope {
+        ids.map { id ->
+            async { MemberClient().fetch(id) }
+        }.awaitAll()
+    }
+```
+
+이 코드는 예제라 client를 직접 만들었지만, Spring 코드에서는 bean으로 주입받은 client를 사용합니다.
+coroutine을 쓰더라도 의존성 주입의 책임은 Spring container에 남겨 둡니다.
+
+## 취소와 예외를 다루는 기준
+
+Kotlin coroutine exception handling 문서는 `CancellationException`이 일반 실패와 다르게 취급된다는 점을 보여 줍니다.
+취소는 실패 로그를 크게 남길 일이 아니라 작업을 멈추라는 신호입니다.
+
+```kotlin
+suspend fun sendWithAudit(command: RegisterCommand) {
+    try {
+        userClient.register(command)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        auditClient.recordFailure(command.requestId, error.message.orEmpty())
+        throw error
+    }
+}
+```
+
+중요한 점은 `CancellationException`을 잡아먹지 않는 것입니다. `catch (Exception)`으로 모든 예외를 감싸고
+도메인 실패로 바꾸면 상위 scope가 취소를 정상적으로 전파하지 못할 수 있습니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫째, coroutine은 thread를 없애는 기술이 아닙니다. JVM에서는 여전히 thread 위에서 실행됩니다.
+다만 suspend 지점에서 thread를 붙잡고 기다리지 않을 수 있습니다.
+
+둘째, `async`는 항상 빠르게 만드는 도구가 아닙니다. CPU 작업을 무작정 병렬화하면 dispatcher와 pool을 압박할 수 있습니다.
+외부 IO를 기다리는 독립 작업을 조합할 때부터 적용합니다.
+
+셋째, `GlobalScope`는 Spring singleton bean처럼 편한 전역 주입점이 아닙니다. 책임자가 없는 작업 묶음입니다.
+서버 종료, 배포, 테스트, request cancellation과 연결되지 않는 코드는 운영에서 비용을 냅니다.
+
+넷째, timeout은 나중에 gateway에서만 걸면 된다는 생각입니다. gateway timeout은 사용자 연결을 끊을 수 있지만,
+내부 작업이 언제 멈춰야 하는지까지 항상 표현해 주지는 않습니다. 업무 timeout은 service boundary에도 남겨야 합니다.
+
+다섯째, 2.4.20의 coroutine stack trace recovery 관련 API를 바로 운영 표준으로 삼으면 안 됩니다.
+릴리스 노트는 `StackTraceRecoverable`을 Experimental API로 안내합니다. 디버깅 가능성은 반갑지만,
+운영 규칙은 stable API와 팀의 관측성 체계부터 세우는 편이 안전합니다.
+
+## 연습 문제
+
+1. 기존 Java `CompletableFuture` 조합 코드 하나를 골라, 실패 시 나머지 작업이 취소되는지 적어 보세요.
+2. 외부 API 두 개를 병렬 조회하는 service 함수를 `coroutineScope`, `async`, `withTimeout`으로 다시 써 보세요.
+3. `catch (Exception)` 블록에서 `CancellationException`을 다시 던지고 있는지 확인해 보세요.
+4. fire-and-forget으로 보이는 작업 하나를 골라, queue가 맞는지 application scope가 맞는지 판단해 보세요.
+5. 요청 안에서 끝날 일과 요청 밖에서도 계속될 일을 표로 나누어 보세요.
+
+오늘의 결론은 "비동기를 더 많이"가 아닙니다. `CoroutineScope`를 쓰면 작업을 더 많이 띄우기 전에
+작업의 책임자, 취소 경계, 실패 전파를 먼저 말하게 됩니다. Spring Boot 서버에서 Kotlin coroutine을 쓰는 이유도
+그 질서를 코드에 남기기 위해서입니다.
+
+## 참고자료
+
+- [What's new in Kotlin 2.4.20](https://kotlinlang.org/docs/whatsnew2420.html) -
+  2026년 10월 2일 확인, Kotlin 2.4.20 안정 릴리스 및 Experimental API 표기 기준
+- [Kotlin coroutines basics](https://kotlinlang.org/docs/coroutines-basics.html) -
+  2026년 10월 2일 확인, suspend function과 structured concurrency 기준
+- [Coroutine context and dispatchers](https://kotlinlang.org/docs/coroutine-context-and-dispatchers.html) -
+  2026년 10월 2일 확인, context와 dispatcher 설명 기준
+- [Coroutine exceptions handling](https://kotlinlang.org/docs/exception-handling.html) -
+  2026년 10월 2일 확인, 취소와 예외 전파 기준
+- [CoroutineScope API reference](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-coroutine-scope/) -
+  2026년 10월 2일 확인, `CoroutineScope` lifecycle 설명 기준

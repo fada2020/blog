@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /저장 위치와 적용 범위를 분리해야 합니다/ })
+    .getByRole("link", { name: /개천절 주말을 짧게 보내기/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/configuration-source-boundary-retrospective-2026-10-01\/$/,
+    /\/blog\/posts\/toddler-national-foundation-weekend-rhythm-2026-10-02\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "설정 관리 회고: 저장 위치와 적용 범위를 분리해야 합니다",
+    "25개월 아이 케어: 개천절 주말을 짧게 보내기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "DB 설정, SSM Parameter, Jenkins 파라미터, Credentials가 승인과 검증 경계를 거쳐 적용되는 무텍스트 운영 다이어그램",
+    "25개월 아이의 개천절 주말을 쌀쌀한 아침, 큰 일교차, 짧은 외출, 낮잠, 실내 놀이 기준으로 나누어 보는 무텍스트 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /저장 위치와 적용 범위를 분리해야 합니다/,
+      name: /개천절 주말을 짧게 보내기/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Spring Boot 개발자를 위한 Kotlin 열일곱째 걸음/,
+      name: /Spring Boot 개발자를 위한 Kotlin 열여덟째 걸음/,
     }),
   ).toBeVisible();
 });
