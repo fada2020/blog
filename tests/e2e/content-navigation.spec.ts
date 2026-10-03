@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /개천절 주말을 짧게 보내기/ })
+    .getByRole("link", { name: /금리, 유가, 반도체 수출 분리하기/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/toddler-national-foundation-weekend-rhythm-2026-10-02\/$/,
+    /\/blog\/posts\/saturday-market-yields-oil-chip-exports-2026-10-03\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "25개월 아이 케어: 개천절 주말을 짧게 보내기",
+    "토요일 주식 학습: 금리, 유가, 반도체 수출 분리하기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "25개월 아이의 개천절 주말을 쌀쌀한 아침, 큰 일교차, 짧은 외출, 낮잠, 실내 놀이 기준으로 나누어 보는 무텍스트 다이어그램",
+    "미국 장기금리, 원유 재고, 달러 원 환율, 한국 반도체 수출을 네 칸으로 나누어 보는 무텍스트 시장 점검 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /개천절 주말을 짧게 보내기/,
+      name: /금리, 유가, 반도체 수출 분리하기/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Spring Boot 개발자를 위한 Kotlin 열여덟째 걸음/,
+      name: /Spring Boot 개발자를 위한 Kotlin 열아홉째 걸음/,
     }),
   ).toBeVisible();
 });
