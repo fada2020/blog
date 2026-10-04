@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /금리, 유가, 반도체 수출 분리하기/ })
+    .getByRole("link", { name: /고용 둔화와 반도체 수출을 따로 읽기/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/saturday-market-yields-oil-chip-exports-2026-10-03\/$/,
+    /\/blog\/posts\/sunday-market-jobs-yields-chip-ledger-2026-10-04\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "토요일 주식 학습: 금리, 유가, 반도체 수출 분리하기",
+    "일요일 주식 학습: 고용 둔화와 반도체 수출을 따로 읽기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "미국 장기금리, 원유 재고, 달러 원 환율, 한국 반도체 수출을 네 칸으로 나누어 보는 무텍스트 시장 점검 다이어그램",
+    "미국 고용, 장기금리, 석유 재고, 한국 반도체 수출, 다음 주 시장 점검표가 나뉜 무텍스트 장부 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /금리, 유가, 반도체 수출 분리하기/,
+      name: /고용 둔화와 반도체 수출을 따로 읽기/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Spring Boot 개발자를 위한 Kotlin 열아홉째 걸음/,
+      name: /Kubernetes 1.37 업그레이드를 운영 장부로 쪼개기/,
     }),
   ).toBeVisible();
 });

@@ -1,0 +1,206 @@
+---
+title: "주간 기술 심화: Kubernetes 1.37 업그레이드를 운영 장부로 쪼개기"
+description: "Kubernetes 1.37.1, 1.34 EOL, version skew, metrics.k8s.io GA, Memory QoS를 Spring Boot 서비스 운영 관점의 업그레이드 장부로 정리합니다."
+publishedAt: 2026-10-04T08:58:00+09:00
+draft: false
+category: "Infrastructure"
+tags: ["Kubernetes", "Spring Boot", "Platform Engineering", "Observability", "Upgrade"]
+kind: "deep-dive"
+heroImage: "../../assets/blog/kubernetes-137-upgrade-ledger-2026-10-04/cover.webp"
+heroImageAlt: "Kubernetes 컨트롤 플레인, 노드, 메트릭 API, 메모리 QoS, Spring Boot 워크로드가 업그레이드 장부로 연결된 무텍스트 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "주간 기술 심화"
+lesson: 9
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 10월 4일 KST 기준으로 Kubernetes 공식 Releases, Kubernetes 1.37 release page,
+> Kubernetes v1.37 release announcement, Version Skew Policy를 확인했습니다. 기준 안정 라인은
+> `Kubernetes 1.37.1`이며, `1.36.5`, `1.35.9`도 지원 중인 release branch입니다. `1.34.12`는
+> 2026년 10월 27일 EOL 예정이라 신규 업그레이드 목표가 아니라 퇴출 대상 장부로 다룹니다.
+> alpha, beta 기능은 본문에서 안정 기능처럼 설명하지 않았습니다.
+
+## 이번 글의 질문
+
+Kubernetes 업그레이드는 클러스터 팀만의 일이 아닙니다. Spring Boot 서비스가 HPA, readiness probe,
+admission webhook, service account token, Prometheus scrape, sidecar, CSI volume에 기대고 있다면
+Kubernetes minor upgrade는 곧 애플리케이션 운영 계약 변경입니다.
+
+오늘 질문은 하나입니다.
+
+**Kubernetes 1.37을 "새 버전"이 아니라 어떤 장부로 나눠 봐야 운영 사고가 줄어들까?**
+
+Kubernetes 공식 Releases 페이지는 현재 유지되는 release branch를 `1.37`, `1.36`, `1.35`로 보여 줍니다.
+같은 표에서 `1.34.12`는 최신 patch가 있더라도 2026년 10월 27일 EOL이라고 표시됩니다. 즉 10월 첫째 주의
+핵심은 "1.37을 바로 올리자"가 아니라 **현재 클러스터가 어느 지원 창에 있는지 먼저 장부화하는 것**입니다.
+
+## 지원 창 장부
+
+Kubernetes 프로젝트는 최신 세 minor release branch를 유지합니다. 1.19 이후 버전은 대략 1년의 patch support를 받습니다.
+2026년 10월 4일 기준 표를 운영 언어로 바꾸면 이렇게 됩니다.
+
+| 라인 | 공식 상태 | Spring Boot 팀에서 볼 질문 |
+|---|---|---|
+| 1.37.1 | actively supported | 새 기능보다 upgrade rehearsal를 먼저 만들 수 있는가 |
+| 1.36.5 | actively supported | 1.37로 갈 때 control plane과 kubelet skew가 안전한가 |
+| 1.35.9 | supported | 다음 분기 안에 1.36 또는 1.37 계획이 있는가 |
+| 1.34.12 | 2026-10-27 EOL 예정 | 새 기능 검토보다 퇴출 일정과 예외 승인이 필요한가 |
+
+이 표에서 "현재도 돈다"와 "지원된다"는 다릅니다. EOL 이후에는 보안 수정과 일반 bug fix가 기대하기 어렵습니다.
+운영팀이 managed Kubernetes를 쓰더라도 애플리케이션 팀은 최소한 다음 값을 알아야 합니다.
+
+```yaml
+clusterLine: "1.35"
+targetLine: "1.37"
+currentPatch: "1.35.9"
+targetPatch: "1.37.1"
+workloadOwners:
+  - spring-boot-api
+  - batch-consumer
+  - admin-worker
+mustCheck:
+  - hpa metric source
+  - webhook resource versions
+  - kubelet cgroup mode
+  - pod disruption budget
+  - rollback window
+```
+
+이 장부가 없으면 upgrade discussion은 "언제 올릴까요?"에서 멈춥니다. 장부가 있으면 "어떤 서비스가 어떤 Kubernetes
+계약에 기대고 있나?"로 바뀝니다.
+
+## 버전 스큐 장부
+
+Kubernetes Version Skew Policy는 업그레이드 순서를 암묵적으로 강제합니다. `kubelet`은 `kube-apiserver`보다
+새로울 수 없고, 일정 범위 안에서만 오래된 버전을 유지할 수 있습니다. `kubectl`도 apiserver의 한 minor 앞뒤 범위로
+제한됩니다.
+
+Spring Boot 개발자에게 이 정책이 중요한 이유는 간단합니다. rollout이 실패했을 때 "애플리케이션 문제"처럼 보이는
+현상이 실제로는 control plane upgrade 순서, admission webhook 호환성, node drain 순서에서 시작될 수 있기 때문입니다.
+
+<Mermaid title="Kubernetes 업그레이드 장부">
+{`flowchart TD
+  Inventory["cluster inventory"] --> Support["support window"]
+  Inventory --> Skew["version skew policy"]
+  Support --> Target["target minor and patch"]
+  Skew --> ControlPlane["upgrade kube-apiserver first"]
+  ControlPlane --> Controllers["controller manager and scheduler"]
+  Controllers --> Nodes["kubelet and kube-proxy"]
+  Nodes --> Workloads["Spring Boot workloads"]
+  Workloads --> Evidence["smoke test and rollback evidence"]
+  Evidence --> ReleaseGate["release gate"]
+`}
+</Mermaid>
+
+특히 HA control plane에서는 더 조심해야 합니다. apiserver끼리도 newest와 oldest가 한 minor 안에 있어야 하고,
+control plane component가 load balancer 뒤의 여러 apiserver와 통신하면 허용 스큐가 좁아집니다. webhook은 새
+apiserver가 보내는 resource version과 field를 처리할 수 있어야 합니다.
+
+서비스 팀이 직접 물어볼 질문은 네 가지입니다.
+
+| 질문 | 이유 |
+|---|---|
+| webhook이 `matchPolicy: Equivalent`를 쓰는가 | 새 resource version을 모르는 webhook이 배포를 막을 수 있음 |
+| controller client가 `429`와 `Retry-After`를 처리하는가 | 1.37의 API server 보호 흐름에서 backoff 품질이 중요해짐 |
+| HPA가 어떤 metric source를 쓰는가 | `metrics.k8s.io` GA와 scale-to-zero 조건을 구분해야 함 |
+| 노드가 cgroups v2 준비가 되어 있는가 | Memory QoS, cgroup v1 deprecation 방향과 직접 연결됨 |
+
+## 1.37에서 안정 기능으로 봐도 되는 것
+
+Kubernetes v1.37 release announcement는 `metrics.k8s.io` API가 Stable로 승격됐다고 설명합니다. 이 API는 CPU와
+memory 사용량을 pod와 node 단위로 가져오는 표준 경로이며, HPA와 `kubectl top` 같은 기능의 기반입니다.
+
+Spring Boot 팀에게 이것은 "관측성 도구가 하나 더 생겼다"가 아닙니다. 자동 확장이 CPU와 memory를 읽는 기본 경로가
+더 단단해졌다는 뜻입니다. 다만 stable API가 됐다고 해서 모든 autoscaling 전략이 안정이라는 뜻은 아닙니다.
+external metric, queue length, custom metric은 여전히 adapter, 권한, 지연 시간, fallback 정책을 별도로 봐야 합니다.
+
+Kubernetes 1.37은 `SELinuxMount`와 `SELinuxChangePolicy`도 Stable로 다룹니다. CSI driver가 opt-in한 경우 볼륨을
+재귀적으로 relabeling하는 대신 mount option으로 label을 다룰 수 있습니다. 파일이 많은 volume을 붙이는 서비스라면
+pod startup time과 node I/O에 영향을 줄 수 있으므로 storage 팀과 함께 측정해야 합니다.
+
+| 1.37 항목 | 안정 상태 | 애플리케이션 팀의 점검 |
+|---|---|---|
+| `metrics.k8s.io` API | Stable | HPA, `kubectl top`, metrics-server 계약 확인 |
+| `SELinuxMount` / `SELinuxChangePolicy` | Stable | CSI driver opt-in, volume startup time 측정 |
+| Memory QoS | Beta, 기본 enabled | cgroups v2, request/limit, throttling 정책 확인 |
+| HPA scale to zero | Beta, 기본 enabled | external/object metric 기반 queue workload에만 실험 |
+| cAdvisor-less stats | Beta, off by default | runtime stats 차이와 dashboard query 확인 |
+
+여기서 중요한 것은 stable과 beta를 같은 칸에 넣지 않는 것입니다. `metrics.k8s.io` API 승격은 운영 기준으로 사용할 수
+있지만, Memory QoS와 scale to zero는 도입 실험의 장부로 따로 관리해야 합니다.
+
+## Spring Boot 서비스에서 깨지기 쉬운 지점
+
+Spring Boot 서비스는 Kubernetes API를 직접 쓰지 않아도 Kubernetes 동작에 많이 기대고 있습니다.
+
+```kotlin
+data class RolloutCheck(
+    val readinessProbe: String,
+    val hpaMetric: String,
+    val shutdownGraceSeconds: Int,
+    val pdbMinAvailable: String,
+    val rollbackSignal: String,
+)
+```
+
+이 값들은 코드 안에 없을 수 있습니다. Helm chart, Kustomize overlay, GitOps repository, platform default에 흩어져
+있습니다. 그래서 Kubernetes 1.37 준비는 application repository만 보는 작업이 아닙니다. deployment manifest와 runtime
+metric까지 함께 보는 운영 점검입니다.
+
+가장 흔한 실패는 세 가지입니다.
+
+| 실패 | 겉으로 보이는 증상 | 실제 확인할 장부 |
+|---|---|---|
+| probe와 graceful shutdown 불일치 | 배포 중 5xx spike | `terminationGracePeriodSeconds`, readiness, LB drain |
+| metric source 지연 | HPA가 늦게 반응하거나 흔들림 | metrics-server, adapter, external metric freshness |
+| webhook 호환성 누락 | apply나 rollout이 막힘 | admission webhook version, timeout, failurePolicy |
+
+Kubernetes 업그레이드 당일에는 새 feature보다 기존 계약의 회귀가 더 자주 문제를 만듭니다.
+
+## 최소 리허설
+
+작은 팀이라도 다음 순서로 리허설을 만들 수 있습니다.
+
+1. 현재 cluster minor와 patch를 기록합니다.
+2. 지원 창과 EOL 날짜를 확인합니다.
+3. target minor의 최신 patch를 목표로 잡습니다.
+4. staging에서 apiserver, controller, node 순서를 분리해 점검합니다.
+5. Spring Boot 서비스는 readiness, shutdown, HPA, queue consumer, batch job을 smoke test로 묶습니다.
+6. dashboard와 alert가 업그레이드 전후 같은 의미를 갖는지 확인합니다.
+7. rollback window와 freeze window를 문서화합니다.
+
+실습용으로는 이런 checklist를 issue template에 넣을 수 있습니다.
+
+```markdown
+## Kubernetes upgrade evidence
+
+- [ ] Current branch and patch:
+- [ ] Target branch and patch:
+- [ ] EOL date checked:
+- [ ] Version skew checked:
+- [ ] Webhook compatibility checked:
+- [ ] HPA metric source checked:
+- [ ] Node drain rehearsal completed:
+- [ ] Spring Boot smoke test completed:
+- [ ] Rollback owner and time window approved:
+```
+
+## 결론
+
+Kubernetes 1.37은 `metrics.k8s.io` stable, SELinux mount 개선, Memory QoS beta처럼 흥미로운 기능을 담고 있습니다.
+하지만 2026년 10월 첫째 주의 실무 포인트는 기능 소개보다 **지원 창, 버전 스큐, 서비스 회귀 증거를 한 장부에 모으는 것**입니다.
+
+Spring Boot 개발자가 가져가야 할 문장은 이것입니다.
+
+**클러스터 업그레이드는 플랫폼 이벤트지만, 서비스 신뢰성은 애플리케이션 팀의 증거로 결정된다.**
+
+## 참고자료
+
+- [Kubernetes Releases](https://kubernetes.io/releases/)
+- [Kubernetes 1.37 release page](https://kubernetes.io/releases/1.37/)
+- [Kubernetes v1.37: Garhwal](https://kubernetes.io/blog/2026/08/26/kubernetes-v1-37-release/)
+- [Kubernetes Version Skew Policy](https://kubernetes.io/releases/version-skew-policy/)
