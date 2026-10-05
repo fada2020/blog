@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /고용 둔화와 반도체 수출을 따로 읽기/ })
+    .getByRole("link", { name: /고정비와 변동비로 물가 예산판 만들기/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/sunday-market-jobs-yields-chip-ledger-2026-10-04\/$/,
+    /\/blog\/posts\/monday-money-fixed-variable-budget-2026-10-05\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "일요일 주식 학습: 고용 둔화와 반도체 수출을 따로 읽기",
+    "월요일 경제 기초: 고정비와 변동비로 물가 예산판 만들기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "미국 고용, 장기금리, 석유 재고, 한국 반도체 수출, 다음 주 시장 점검표가 나뉜 무텍스트 장부 다이어그램",
+    "월급, 고정비, 변동비, 저축, 투자 대기금, 소비자물가지수가 연결된 무텍스트 개인 예산판 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /고용 둔화와 반도체 수출을 따로 읽기/,
+      name: /고정비와 변동비로 물가 예산판 만들기/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Kubernetes 1.37 업그레이드를 운영 장부로 쪼개기/,
+      name: /AnimationController 생명주기 다루기/,
     }),
   ).toBeVisible();
 });
@@ -111,14 +111,14 @@ test("카테고리와 태그로 공개 글을 탐색할 수 있다", async ({ pa
   await expect(page).toHaveURL(/\/blog\/categories\/Frontend\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Frontend 글");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 열아홉째 걸음/ }),
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스무째 걸음/ }),
   ).toBeVisible();
 
   await page.getByRole("link", { name: "#Flutter", exact: true }).first().click();
   await expect(page).toHaveURL(/\/blog\/tags\/Flutter\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("#Flutter");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 열아홉째 걸음/ }),
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스무째 걸음/ }),
   ).toBeVisible();
 });
 
@@ -150,7 +150,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("학습 글");
   await expect(
     page.getByRole("link", {
-      name: /실질금리로 월급통장 사다리 세우기/,
+      name: /고정비와 변동비로 물가 예산판 만들기/,
     }),
   ).toBeVisible();
 
