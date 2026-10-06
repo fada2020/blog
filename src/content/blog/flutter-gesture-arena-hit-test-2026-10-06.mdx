@@ -1,0 +1,195 @@
+---
+title: "Spring Boot 개발자를 위한 Flutter 스물한째 걸음: GestureDetector와 hit test 경계"
+description: "Spring MVC의 request mapping과 event listener 감각에 빗대어 Flutter pointer event, hit test, GestureDetector, gesture arena를 정리합니다."
+publishedAt: 2026-10-06T00:03:00+09:00
+draft: false
+category: "Frontend"
+tags: ["Flutter", "Dart", "Spring Boot", "Gesture", "Mobile"]
+kind: "learning"
+heroImage: "../../assets/blog/flutter-gesture-arena-hit-test-2026-10-06/cover.webp"
+heroImageAlt: "Flutter 화면의 pointer event, hit test path, GestureDetector, gesture arena, callback 흐름이 연결된 무텍스트 기술 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 모바일 앱 학습"
+lesson: 21
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 10월 6일 KST 기준으로 Flutter SDK archive JSON, Flutter gestures guide,
+> `GestureDetector`, `PointerEvent`, `AbsorbPointer` API 문서를 확인했습니다. SDK archive의 stable channel은
+> Flutter 3.47.6, Dart 3.13.5를 가리켰습니다. 이 글은 stable channel의 공개 API를 기준으로 하며
+> beta, dev, main channel 기능을 안정 기능처럼 설명하지 않습니다.
+
+## 결론부터 말하면
+
+Flutter에서 tap과 drag를 붙일 때 가장 먼저 잡아야 할 기준은 **이 widget이 event를 받는가**와
+**받은 event를 어떤 gesture로 해석할 것인가**를 분리하는 것입니다.
+
+Spring Boot로 치면 첫 번째는 request가 어떤 handler mapping까지 도달하는지에 가깝고, 두 번째는 그 요청을
+어떤 controller method나 interceptor가 의미 있는 행동으로 해석하는지에 가깝습니다. Flutter에서는 raw pointer event가
+hit test path를 따라 전달되고, `GestureDetector` 같은 recognizer들이 gesture arena에서 경쟁합니다.
+
+## 이번 주 개념
+
+Flutter 공식 gestures 문서는 입력을 두 층으로 나눕니다. 아래층은 `PointerDownEvent`, `PointerMoveEvent`,
+`PointerUpEvent`, `PointerCancelEvent` 같은 raw pointer event입니다. 위층은 tap, drag, scale처럼 사용자가 의도한
+semantic action입니다.
+
+| Flutter 개념 | 역할 | Spring Boot에 비유하면 |
+|---|---|---|
+| `PointerEvent` | 좌표, 이동량, 장치 종류가 담긴 원시 입력 | raw HTTP request 또는 socket event |
+| hit test | pointer 위치에 있는 widget path 찾기 | handler mapping 또는 filter chain 진입 |
+| `Listener` | 낮은 수준 pointer event 수신 | servlet filter가 raw request를 보는 지점 |
+| `GestureDetector` | tap, drag, long press 같은 의미 있는 gesture 인식 | controller action 또는 domain command |
+| gesture arena | 여러 recognizer 중 승자를 정함 | 여러 handler 후보 중 최종 처리자 결정 |
+| `AbsorbPointer` / `IgnorePointer` | pointer 수신 경계 제어 | 요청 차단 또는 하위 handler 우회 |
+
+<Mermaid title="Flutter pointer event와 gesture arena 흐름">
+{`flowchart TD
+  Input["Touch / mouse / stylus"] --> Pointer["PointerEvent"]
+  Pointer --> HitTest["hit test"]
+  HitTest --> Path["widget path"]
+  Path --> Listener["Listener"]
+  Path --> Detector["GestureDetector"]
+  Detector --> Arena["gesture arena"]
+  Arena --> Winner["winning recognizer"]
+  Winner --> Callback["onTap / onPanUpdate / onLongPress"]
+`}
+</Mermaid>
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Spring MVC에서는 request가 들어오면 URL, HTTP method, header, content type 같은 정보로 handler를 찾습니다. 그 앞뒤로
+filter, interceptor, argument resolver가 붙을 수 있지만, 결국 "어느 handler가 이 요청을 처리하는가"가 중요합니다.
+
+```java
+@RestController
+class CardController {
+    @PostMapping("/cards/{id}/like")
+    ResponseEntity<Void> like(@PathVariable long id) {
+        return ResponseEntity.noContent().build();
+    }
+}
+```
+
+여기서 `/cards/10/like`는 단순 문자열이 아니라 "좋아요 명령"이라는 의미를 갖습니다. Flutter에서도 screen coordinate는
+처음에는 raw data일 뿐입니다. `GestureDetector(onTap: ...)`가 붙는 순간 그 좌표 변화는 "이 카드가 눌렸다"는 semantic
+event로 바뀝니다.
+
+## Flutter에서는 무엇이 다른가
+
+Flutter는 pointer down 시점에 hit test를 수행합니다. 그 위치의 가장 안쪽 widget부터 root까지 path를 만들고, pointer down과
+같은 pointer의 후속 event를 그 path에 전달합니다. 공식 문서는 pointer event를 더 위로 전달하지 못하게 cancel하는 mechanism은
+없다고 설명합니다. 그래서 "부모가 자식 event를 막는다"보다 "hit test와 gesture recognizer 경쟁을 설계한다"가 더 정확합니다.
+
+```dart
+class LikeCard extends StatelessWidget {
+  const LikeCard({super.key, required this.onLike});
+
+  final VoidCallback onLike;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onLike,
+      child: const Padding(
+        padding: EdgeInsets.all(16),
+        child: Text('Like'),
+      ),
+    );
+  }
+}
+```
+
+`behavior: HitTestBehavior.opaque`는 빈 영역도 hit test 대상으로 삼을 때 씁니다. 하지만 이것이 gesture arena의 승패를
+무조건 바꾸지는 않습니다. 공식 `GestureDetector` 문서는 `translucent`나 `opaque`로 바꾸어도 둘 이상의 detector가 arena에
+들어가면 하나만 이긴다는 점을 보여 줍니다. `behavior`는 "대상으로 볼 영역"의 문제이고, arena는 "어떤 gesture가 확정되는가"의
+문제입니다.
+
+## 대응 개념 비교
+
+| 상황 | Spring Boot 감각 | Flutter 감각 |
+|---|---|---|
+| 클릭 가능한 카드 전체 | `/cards/{id}` handler mapping | card 전체를 `GestureDetector`로 감쌈 |
+| 카드 안의 작은 메뉴 버튼 | nested route 또는 별도 action | 자식 detector가 먼저 arena에 들어갈 수 있음 |
+| raw drag 좌표가 필요함 | request body를 직접 파싱 | `Listener`로 `PointerMoveEvent` 확인 |
+| tap과 vertical scroll이 충돌 | handler precedence 확인 | gesture arena에서 drag와 tap이 disambiguation |
+| disabled overlay | auth filter나 feature flag로 차단 | `AbsorbPointer` 또는 `IgnorePointer`로 입력 경계 설정 |
+
+자주 하는 실수는 `GestureDetector`를 모든 곳에 붙이는 것입니다. Material UI에서 ripple, focus, semantics까지 기대한다면
+`InkWell`, `IconButton`, `TextButton` 같은 기존 component가 더 낫습니다. `GestureDetector`는 낮은 수준의 tool입니다.
+버튼처럼 보이는 것을 만들고 싶다면 버튼 component가 가진 accessibility 계약까지 같이 봐야 합니다.
+
+## 최소 실행 예제
+
+다음 예제는 부모 카드의 tap과 자식 버튼의 tap을 나눕니다. 실제 앱에서는 navigation, analytics, state update가 뒤섞이기 쉬운
+자리입니다. callback을 명확히 분리하면 arena와 business action을 같이 추적하기 쉽습니다.
+
+```dart
+class ProductCard extends StatelessWidget {
+  const ProductCard({
+    super.key,
+    required this.title,
+    required this.onOpen,
+    required this.onFavorite,
+  });
+
+  final String title;
+  final VoidCallback onOpen;
+  final VoidCallback onFavorite;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onOpen,
+      child: Row(
+        children: [
+          Expanded(child: Text(title)),
+          IconButton(
+            onPressed: onFavorite,
+            icon: const Icon(Icons.favorite_border),
+            tooltip: '관심 상품',
+          ),
+        ],
+      ),
+    );
+  }
+}
+```
+
+여기서 자식 `IconButton`은 자체적으로 tap과 semantics를 처리합니다. 부모 `GestureDetector`는 카드 배경을 눌렀을 때만
+상세 화면으로 보내는 역할에 집중합니다. "왜 부모 tap이 같이 실행되지 않지?"라고 느껴진다면 gesture arena가 한 pointer sequence에
+대해 하나의 승자를 고르는 구조를 떠올리면 됩니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫째, event bubbling을 DOM처럼 생각하기 쉽습니다. Flutter pointer event는 path를 따라 전달되지만, gesture callback은
+recognizer가 arena에서 이긴 뒤 호출됩니다. pointer 전달과 gesture 확정은 같은 일이 아닙니다.
+
+둘째, `Listener`가 더 빠르고 정확하니 항상 좋다고 생각하기 쉽습니다. `Listener`는 raw event가 필요할 때만 씁니다. 대부분의
+tap, drag, long press는 `GestureDetector`나 Material component를 쓰는 편이 읽기 쉽고 accessibility도 챙기기 좋습니다.
+
+셋째, 투명한 widget이 tap을 받을 것이라고 기대합니다. `GestureDetector`에 child가 있더라도 빈 영역을 어떻게 hit test할지는
+`behavior`를 확인해야 합니다. 디버깅할 때는 `debugPaintPointersEnabled`로 hit test box를 보는 방법도 있습니다.
+
+## 연습 문제
+
+1. 카드 전체를 누르면 상세 화면으로 가고, 오른쪽 아이콘은 즐겨찾기만 바꾸는 UI를 만들어 보세요.
+2. `GestureDetector`의 `behavior`를 기본값, `opaque`, `translucent`로 바꾸며 빈 영역 tap이 어떻게 달라지는지 확인하세요.
+3. `Listener`로 `PointerMoveEvent.delta`를 출력하고, 같은 동작을 `onPanUpdate`로 바꿔 보세요.
+4. `AbsorbPointer`를 overlay에 붙여 loading 중 하위 버튼이 눌리지 않는지 확인하세요.
+5. 같은 좌표에 tap과 long press를 모두 붙였을 때 어떤 callback이 언제 호출되는지 log로 남겨 보세요.
+
+## 참고자료
+
+- [Flutter SDK archive](https://docs.flutter.dev/install/archive)
+- [Flutter release archive JSON - Linux](https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json)
+- [Flutter docs - Taps, drags, and other gestures](https://docs.flutter.dev/ui/interactivity/gestures)
+- [Flutter API - GestureDetector](https://api.flutter.dev/flutter/widgets/GestureDetector-class.html)
+- [Flutter API - PointerEvent](https://api.flutter.dev/flutter/gestures/PointerEvent-class.html)
+- [Flutter API - AbsorbPointer](https://api.flutter.dev/flutter/widgets/AbsorbPointer-class.html)

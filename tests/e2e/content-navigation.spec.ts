@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /고정비와 변동비로 물가 예산판 만들기/ })
+    .getByRole("link", { name: /Agent 브라우저, 플랫폼 실행 경계, Kubernetes swap/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/monday-money-fixed-variable-budget-2026-10-05\/$/,
+    /\/blog\/posts\/weekly-it-trends-2026-10-06\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "월요일 경제 기초: 고정비와 변동비로 물가 예산판 만들기",
+    "2026년 10월 첫째 주 IT 기술동향: Agent 브라우저, 플랫폼 실행 경계, Kubernetes swap",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "월급, 고정비, 변동비, 저축, 투자 대기금, 소비자물가지수가 연결된 무텍스트 개인 예산판 다이어그램",
+    "브라우저 agent, private package 설치, 보안 sandbox 네트워크, Kubernetes node swap, 운영 검증표가 연결된 무텍스트 기술 동향 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /고정비와 변동비로 물가 예산판 만들기/,
+      name: /Agent 브라우저, 플랫폼 실행 경계, Kubernetes swap/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /AnimationController 생명주기 다루기/,
+      name: /GestureDetector와 hit test 경계/,
     }),
   ).toBeVisible();
 });
@@ -111,14 +111,14 @@ test("카테고리와 태그로 공개 글을 탐색할 수 있다", async ({ pa
   await expect(page).toHaveURL(/\/blog\/categories\/Frontend\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Frontend 글");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스무째 걸음/ }),
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스물한째 걸음/ }),
   ).toBeVisible();
 
   await page.getByRole("link", { name: "#Flutter", exact: true }).first().click();
   await expect(page).toHaveURL(/\/blog\/tags\/Flutter\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("#Flutter");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스무째 걸음/ }),
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스물한째 걸음/ }),
   ).toBeVisible();
 });
 
@@ -150,7 +150,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("학습 글");
   await expect(
     page.getByRole("link", {
-      name: /고정비와 변동비로 물가 예산판 만들기/,
+      name: /GestureDetector와 hit test 경계/,
     }),
   ).toBeVisible();
 

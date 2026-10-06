@@ -1,0 +1,165 @@
+---
+title: "2026년 10월 첫째 주 IT 기술동향: Agent 브라우저, 플랫폼 실행 경계, Kubernetes swap"
+description: "2026년 9월 29일부터 10월 6일까지 공식 발표된 OpenAI Agents API computer use, Vercel Agent Stack, Kubernetes node swap 흐름을 Spring Boot 팀 관점에서 정리합니다."
+publishedAt: 2026-10-06T00:04:00+09:00
+draft: false
+category: "Tooling"
+tags: ["Tech Trends", "AI Agents", "Vercel", "Kubernetes", "Platform Engineering"]
+kind: "trend"
+heroImage: "../../assets/blog/weekly-it-trends-2026-10-06/cover.webp"
+heroImageAlt: "브라우저 agent, private package 설치, 보안 sandbox 네트워크, Kubernetes node swap, 운영 검증표가 연결된 무텍스트 기술 동향 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 범위**
+>
+> 2026년 10월 6일 KST에 공식 changelog, 공식 블로그, 공식 문서를 확인했습니다. 범위는 2026년 9월 29일부터
+> 2026년 10월 6일까지 공개된 공식 발표입니다. 기준 상태는 OpenAI Agents API의 computer use 추가와
+> GPT-6.1 Sol 출시, Vercel AI Gateway와 Vercel Agent의 2026년 9월 30일 발표, Kubernetes의 2026년 10월 5일
+> node swap benchmark 글입니다. preview나 beta가 아닌 항목만 안정 기능처럼 설명하고, 기능별 적용 전 검증 질문을 함께 둡니다.
+
+## 결론부터 말하면
+
+이번 주 동향은 **agent가 실제 브라우저와 dependency install, sandbox, cluster memory까지 더 깊게 들어오면서
+운영 경계가 code review 바깥으로 확장된다**는 흐름으로 묶입니다.
+
+OpenAI는 Agents API에 computer use를 추가해 application이 OpenAI-hosted browser 작업을 맡길 수 있게 했고,
+Vercel은 AI Gateway와 Vercel Agent 주변에 web discovery, private package 설치, sandbox network 연결을 넓혔습니다.
+Kubernetes는 agentic workload와 browser sandbox를 예시로 node swap을 benchmark했습니다.
+
+Spring Boot 팀이 볼 지점은 "새 agent가 나왔다"가 아닙니다. 이제 agent는 browser를 열고, private package를 설치하고,
+격리된 runtime에서 코드를 실행하고, cluster memory policy의 영향을 받습니다. 따라서 평가 기준도 모델 품질만이 아니라
+승인 흐름, secret 주입 범위, network perimeter, node resource policy까지 내려와야 합니다.
+
+## 이번 주에 확인한 큰 흐름
+
+| 영역 | 공식 발표 | Spring Boot 팀이 볼 지점 |
+|---|---|---|
+| AI agent browser | OpenAI Agents API computer use | 웹 작업 승인, sign-in, browser automation evidence를 분리합니다. |
+| 모델과 비용 | OpenAI GPT-6.1 Sol | coding model 비용과 multi-agent beta 사용 범위를 따로 평가합니다. |
+| Agent platform | Vercel Agent private package 설치 | `NPM_TOKEN`, private registry, build secret 노출 범위를 점검합니다. |
+| AI Gateway | Vercel Browserbase Search/Fetch, Microsoft audio models | retrieval tool과 provider gateway의 trace, billing, 권한을 기록합니다. |
+| Infra density | Kubernetes node swap benchmark | browser sandbox와 Python sandbox의 memory request/limit를 재검토합니다. |
+
+직전 기술동향 글은 GitHub Actions Node 24 전환, GitHub proof of presence, AWS SDK for Java warm-up, Google Cloud
+agent governance와 GKE를 다뤘습니다. 이번 글은 같은 GitHub Actions, AWS Java SDK, Google Cloud/GKE 제품 축을 반복하지 않고
+OpenAI API, Vercel Agent Stack, upstream Kubernetes node resource 정책으로 범위를 옮겼습니다.
+
+<Mermaid title="2026년 10월 첫째 주 기술 동향 흐름">
+{`flowchart LR
+  Official["공식 발표<br/>2026-09-29 ~ 2026-10-06"] --> Browser["agent browser"]
+  Official --> Package["private package install"]
+  Official --> Gateway["AI Gateway tools"]
+  Official --> Swap["Kubernetes node swap"]
+
+  Browser --> Boundary["승인과 sign-in 경계"]
+  Package --> Boundary
+  Gateway --> Evidence["trace와 비용 증적"]
+  Swap --> Capacity["memory와 density 계획"]
+
+  Boundary --> Runbook["운영 runbook"]
+  Evidence --> Runbook
+  Capacity --> Runbook
+`}
+</Mermaid>
+
+## 1. OpenAI Agents API는 browser 작업을 application 경계 안으로 들였습니다
+
+OpenAI API changelog는 2026년 9월 29일 Agents API에 computer use가 추가되었다고 기록했습니다. Agents가 OpenAI-hosted
+browser에서 작업을 수행하고, website access approval과 sign-in은 application이 처리하는 구조입니다. 같은 날 GPT-6.1 Sol도
+Responses API와 Chat Completions API에 공개되었고, 복잡한 coding과 professional work를 더 낮은 비용으로 처리하는 모델로
+설명되었습니다.
+
+Spring Boot 팀 관점에서는 agent browser를 단순히 "E2E를 대신 돌리는 도구"로 보면 위험합니다. 실제 브라우저 작업은
+세 가지 증적을 나눠야 합니다.
+
+| 증적 | 남길 질문 | 예시 |
+|---|---|---|
+| 승인 | agent가 어떤 site access를 요청했고 누가 허용했는가 | staging admin 접근 승인 |
+| 인증 | sign-in은 어느 계정과 session으로 처리했는가 | shared account 금지, short-lived account 사용 |
+| 결과 | browser가 실제로 무엇을 봤고 무엇을 변경했는가 | screenshot, DOM text, audit log |
+
+Java/Spring Boot 서비스에서 관리자 화면을 agent가 조작하게 한다면 더 조심해야 합니다. API test는 request/response 로그로
+추적할 수 있지만, browser 작업은 UI state와 side effect가 섞입니다. 최소한 read-only 탐색, form submit, destructive action을
+다른 approval level로 나누는 것이 좋습니다.
+
+```java
+record AgentBrowserApproval(
+    String runId,
+    String targetOrigin,
+    String capability,
+    Instant approvedAt,
+    String approver
+) {}
+```
+
+이런 기록은 agent tool log와 별개로 application audit log에 남겨야 합니다. "agent가 알아서 했다"는 문장은 장애 보고서에서
+가장 약한 문장입니다.
+
+## 2. Vercel Agent Stack은 dependency와 retrieval 경계를 넓혔습니다
+
+Vercel changelog는 2026년 9월 30일 Vercel Agent가 private npm package와 custom registry를 설치할 수 있게 되었다고
+공지했습니다. 팀의 shared environment variable로 `NPM_TOKEN` 또는 `NPM_RC`를 추가해 private registry 인증을 처리하는 방식입니다.
+
+같은 날 AI Gateway에는 Browserbase Search와 Fetch tools가 추가되었고, Vercel Sandbox는 Secure Compute Connect를 지원한다고
+공지되었습니다. 10월 1일에는 AI Gateway에 Microsoft AI audio model과 Laya decision model도 추가되었습니다.
+
+이 흐름은 frontend platform 이야기처럼 보이지만, backend 팀에도 바로 연결됩니다.
+
+| Vercel 발표 | backend 팀이 확인할 질문 |
+|---|---|
+| private package 설치 | agent build가 사내 package를 읽을 때 token scope와 audit는 충분한가 |
+| Browserbase Search/Fetch | agent retrieval이 어떤 web source를 조회했는지 trace가 남는가 |
+| Sandbox Secure Compute | sandbox가 private network에 닿을 때 allowlist와 egress log가 있는가 |
+| AI Gateway model 추가 | provider별 가격, latency, data policy가 routing rule에 반영되는가 |
+
+Spring Boot 개발자가 익숙한 CI/CD 관점으로 보면, agent runtime도 build worker입니다. build worker가 private Maven repository에
+접근할 때 token scope를 제한하듯, agent가 private npm registry나 internal package를 읽는 범위도 제한해야 합니다.
+
+## 3. Kubernetes node swap은 agentic workload의 idle memory를 운영 주제로 만들었습니다
+
+Kubernetes 공식 블로그는 2026년 10월 5일 node swap을 이용해 workload density를 높이는 benchmark를 공개했습니다.
+Kubernetes node swap은 v1.34에서 GA가 되었고, 글은 Local SSD-backed swap을 CI/CD kernel build, headless browser sandbox,
+isolated Python sandbox에 적용한 결과를 다뤘습니다.
+
+흥미로운 지점은 예시 workload입니다. 전통적인 batch build뿐 아니라 headless Chrome, gVisor, Kata Containers, Python sandbox가
+나옵니다. 모두 agent 실행 환경에서 자주 만나는 모양입니다. browser automation과 untrusted code execution은 시작할 때 memory를
+크게 먹고, 이후에는 user prompt를 기다리며 idle 상태로 남을 수 있습니다.
+
+| workload | 글에서 강조한 관찰 | 운영 해석 |
+|---|---|---|
+| CI/CD kernel build | Local SSD swap으로 memory footprint를 낮춤 | active working set까지 swap으로 밀면 latency가 커짐 |
+| headless browser sandbox | gVisor/Kata 환경에서 pod density 개선 | security runtime overhead를 capacity plan에 넣어야 함 |
+| Python sandbox | 동시 isolated session을 크게 늘림 | CPU contention과 memory pressure를 함께 봐야 함 |
+
+Spring Boot API 서버에 바로 swap을 켜자는 뜻은 아닙니다. JVM heap, GC, latency SLO가 있는 서비스는 swap이 tail latency를
+악화시킬 수 있습니다. 다만 browser test farm, ephemeral preview, agent sandbox, batch job runner처럼 idle memory가 큰
+workload는 request/limit와 node pool policy를 다시 볼 만합니다.
+
+## 후보 검토에서 제외한 발표
+
+| 후보 | 제외 이유 |
+|---|---|
+| GitHub Actions 10월 changelog | 직전 기술동향에서 GitHub Actions Node 24와 proof of presence를 이미 다뤘습니다. |
+| Chrome DevTools October 2026 | 발표일이 2026년 9월 22일로 이번 7일 범위를 벗어났습니다. |
+| Anthropic enterprise AI talent / customer announcements | 공식 발표지만 개발자가 바로 적용할 API, release, runtime 변경보다는 사업·도입 사례 성격이 강했습니다. |
+| Node.js 26.10.0 | 2026년 9월 22일 release라 이번 7일 범위를 벗어났습니다. |
+
+## Spring Boot 팀의 이번 주 점검표
+
+1. Agent browser 작업을 read-only, write, destructive action으로 나누고 approval log를 분리합니다.
+2. Agent가 package registry에 접근한다면 token scope, rotation, audit log, secret masking을 점검합니다.
+3. AI Gateway나 model router를 쓰면 provider, model, price tier, latency, trace ID를 request log에 남깁니다.
+4. Browser/Python sandbox workload는 JVM API node pool과 분리하고, memory request/limit와 CPU saturation을 같이 봅니다.
+5. Kubernetes swap은 latency-sensitive service가 아니라 agent sandbox와 batch workload부터 실험합니다.
+
+## 참고자료
+
+- [OpenAI API changelog](https://developers.openai.com/api/docs/changelog)
+- [OpenAI Agents API computer use docs](https://developers.openai.com/api/docs/agents/tools/computer-use)
+- [Vercel changelog](https://vercel.com/changelog)
+- [Kubernetes Blog - Scaling Kubernetes Workloads with Node Swap](https://kubernetes.io/blog/2026/10/05/scaling-kubernetes-workloads-with-node-swap/)
+- [Kubernetes node swap documentation](https://kubernetes.io/docs/concepts/cluster-administration/swap-memory-management/)
