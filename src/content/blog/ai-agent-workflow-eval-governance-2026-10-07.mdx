@@ -1,0 +1,185 @@
+---
+title: "AI agent 실전 운영: 동적 워크플로우와 평가 전환"
+description: "OpenAI의 Evals 전환과 사용량 tier 변경, GitHub Copilot의 dynamic workflow와 computer use, Grok 안전 식별자, Mistral Vibe 지식 기반을 agent 운영 관점에서 비교합니다."
+publishedAt: 2026-10-07T00:04:00+09:00
+draft: false
+category: "Tooling"
+tags: ["AI Agent", "Codex", "GitHub Copilot", "Evals", "Governance"]
+kind: "trend"
+heroImage: "../../assets/blog/ai-agent-workflow-eval-governance-2026-10-07/cover.webp"
+heroImageAlt: "AI agent 작업이 동적 워크플로우, 평가 데이터셋, 데스크톱 승인, 사용량 정책, 감사 로그로 이어지는 무텍스트 운영 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 범위**
+>
+> 2026년 10월 7일 09시 KST에 OpenAI API changelog와 deprecations 문서, agent evaluation 문서,
+> GitHub Copilot changelog, xAI release notes와 model 문서, Mistral release notes를 확인했습니다.
+> GitHub Copilot computer use와 dynamic workflow는 public preview로 구분했고, OpenAI Evals platform은
+> read-only와 shutdown 일정이 잡힌 전환 대상으로 구분했습니다.
+
+## 결론부터 말하면
+
+이번 주 AI agent 비교의 중심은 새 모델 이름보다 **반복 가능한 작업 절차와 평가 체계가 agent 제품의 핵심 기능이 되고 있다**는 점입니다.
+
+지난 글이 sandbox, memory, observability로 agent를 어디에 태울지 보았다면, 이번에는 agent에게 일을 맡긴 뒤
+"같은 절차를 반복할 수 있는가", "평가와 비용 정책이 남는가", "GUI 조작을 사람이 승인할 수 있는가"를 봐야 합니다.
+
+Spring Boot 팀이라면 agent를 chat UI로만 보지 않는 편이 좋습니다. 이제 agent는 release checklist, PR review,
+운영 리서치, desktop-only 업무까지 들어오고 있습니다. 그러면 prompt보다 먼저 workflow code, eval dataset, approval policy,
+usage limit을 정해야 합니다.
+
+## 이번 주 공식 신호
+
+| 후보 | 최근 공식 상태 | 실무 질문 |
+|---|---|---|
+| OpenAI API | 2026-10-06 usage tier를 Build, Launch, Grow로 단순화 | agent workload의 rate limit과 예산 경계가 충분히 보이는가 |
+| OpenAI Evals | 2026-10-31 read-only, 2026-11-30 shutdown 예정 | 기존 eval을 datasets, traces, Promptfoo 등으로 어떻게 옮길 것인가 |
+| GitHub Copilot dynamic workflows | 2026-10-01 public preview | 반복 작업을 prompt가 아니라 code-defined workflow로 만들 것인가 |
+| GitHub Copilot computer use | 2026-10-01 public preview | GUI-only 업무에 어떤 승인과 화면 증적을 요구할 것인가 |
+| GitHub Copilot code review API | 2026-10-02 GA | review 깊이를 PR risk와 자동화 policy에 연결할 수 있는가 |
+| xAI Grok | 2026-10-02 voice model EOL, 9월 safety identifier와 Grok 4.7 확인 | end-user 식별자와 model alias를 운영 로그에 어떻게 남길 것인가 |
+| Mistral Vibe | 2026-09-22 unified Vibe와 Agentic Knowledge Base preview | memory를 flat prompt가 아니라 검토 가능한 지식 기반으로 다룰 것인가 |
+
+## 동적 워크플로우는 prompt를 운영 절차로 바꿉니다
+
+GitHub Copilot의 dynamic workflows는 작업 절차를 code로 정의하고, agent는 분석이나 판단이 필요한 단계에 들어가게 하는 방식입니다.
+공식 changelog는 명령 실행, 병렬 task, structured result 전달, 상호 검증, checkpoint pause 같은 기능을 강조합니다.
+
+이 방향은 Spring Batch나 GitHub Actions에 익숙한 팀에게 자연스럽습니다. 운영 작업은 "좋게 조사해 줘"보다
+"로그 수집 -> subsystem별 분석 -> timeline 병합 -> 사람 승인 -> follow-up issue 생성"처럼 단계가 있어야 재현됩니다.
+
+<Mermaid title="agent workflow 운영 루프">
+{`flowchart TD
+  Trigger["작업 트리거"] --> Workflow["code-defined workflow"]
+  Workflow --> Collect["자료 수집"]
+  Collect --> Agents["병렬 agent 분석"]
+  Agents --> Verify["상호 검증"]
+  Verify --> Eval["trace / dataset 평가"]
+  Eval --> Approval["사람 승인"]
+  Approval --> Change["수정 또는 보고"]
+  Change --> Audit["감사 로그와 비용 기록"]
+`}
+</Mermaid>
+
+Java/Spring Boot 팀이 바로 따라 할 최소 단위는 거창한 platform이 아닙니다. 반복되는 release check 하나를 골라
+workflow 파일로 만듭니다. agent에게 맡기는 단계와 deterministic code가 처리하는 단계를 분리하고, 결과 schema를 고정합니다.
+
+| 단계 | 사람이 기대하는 결과 | agent에게 맡길 수 있는 부분 |
+|---|---|---|
+| 변경 파일 수집 | diff와 영향 영역 목록 | 영향 설명 초안 |
+| 테스트 결과 수집 | pass/fail와 실패 로그 | 실패 원인 후보 분류 |
+| 릴리스 위험 판단 | 승인/보류 decision | 위험 근거 요약 |
+| 기록 저장 | PR comment, release note, issue | 초안 작성 |
+
+## 평가 전환은 agent 품질을 "느낌"에서 "회귀 관리"로 옮깁니다
+
+OpenAI deprecations 문서는 기존 Evals platform이 2026년 10월 31일 read-only가 되고 11월 30일 shutdown될 예정이라고
+알립니다. 동시에 agent evaluation 문서는 trace, grader, dataset, eval run을 agent workflow 품질 개선의 표면으로 제시합니다.
+
+핵심은 특정 도구 이름이 아닙니다. agent 결과를 평가할 때 최종 답만 보면 안 된다는 점입니다. agent가 어떤 tool을 골랐는지,
+handoff가 필요한 곳에서 일어났는지, guardrail을 어겼는지, routing 변경이 실제로 좋아졌는지 봐야 합니다.
+
+```text
+agent-evals/
+  release-check.dataset.jsonl
+  incident-triage.dataset.jsonl
+  pr-review-risk-rubric.md
+  migration-notes.md
+```
+
+기존 Evals를 쓰고 있었다면 지금 할 일은 "언젠가 옮기기"가 아니라 inventory입니다.
+
+1. 어떤 eval이 production agent release gate인지 표시합니다.
+2. 각 eval의 input, expected outcome, grader, owner를 분리합니다.
+3. trace 기반 debug와 dataset 기반 regression을 나눕니다.
+4. shutdown 이전에 대체 runner에서 같은 dataset을 한 번 실행합니다.
+
+## 데스크톱 computer use는 승인 경계를 새로 엽니다
+
+GitHub Copilot computer use public preview는 CLI와 Copilot app이 macOS와 Windows desktop application을 읽고 클릭하고 입력하고
+스크롤할 수 있게 합니다. 공식 changelog는 app control 전 승인, always allow app 관리, macOS Accessibility와 Screen Recording
+권한 안내, organization-managed disable 설정을 함께 설명합니다.
+
+이 기능은 강력하지만, Spring Boot 팀의 기존 자동화 감각과 다릅니다. API call은 request log가 남습니다. CLI command는 shell
+history와 output이 남습니다. GUI 조작은 화면 상태와 accessibility text, 사용자가 승인한 app 범위가 증적입니다.
+
+| 자동화 대상 | 기본 증적 | 추가로 필요한 통제 |
+|---|---|---|
+| API 호출 | request, response, status code | idempotency key, retry policy |
+| CLI 명령 | command, stdout, exit code | working directory, env diff |
+| browser 작업 | URL, DOM, screenshot | login scope, form submit 승인 |
+| desktop app 작업 | app name, screenshot/accessibility state | app allowlist, step approval, reset path |
+
+GUI-only 사내 도구나 legacy admin app을 agent가 다룰 수 있게 되면, "agent가 눌렀다"는 말만으로는 부족합니다. 어떤 app을
+허용했는지, 어떤 화면에서 어떤 control을 눌렀는지, 저장 전 사람이 확인했는지 남겨야 합니다.
+
+## 사용량과 식별자는 agent 운영 데이터입니다
+
+OpenAI API changelog는 2026년 10월 6일 usage tier를 Build, Launch, Grow 세 단계로 단순화했다고 알립니다. xAI release notes는
+9월에 `safety_identifier` request field를 추가했고, 10월에는 오래된 voice transcription model EOL을 처리했습니다.
+
+둘은 다른 소식처럼 보이지만 운영 관점에서는 같은 범주입니다. agent가 길게 실행될수록 비용과 책임 소재를 request 단위로
+추적해야 합니다.
+
+```text
+agent_run_id
+workflow_name
+model_or_agent
+user_or_safety_identifier
+tool_calls
+approval_checkpoints
+input_tokens / output_tokens / sandbox_minutes
+final_artifact
+```
+
+이 정도 metadata가 없으면 "이번 달 agent 비용이 왜 늘었는가"나 "어떤 사용자의 요청에서 policy violation이 반복되는가"를
+추적하기 어렵습니다. 반대로 이 metadata가 있으면 모델 교체, tier 변경, review effort 변경이 실제 품질과 비용에 어떤 영향을
+줬는지 볼 수 있습니다.
+
+## 메모리는 자동 주입보다 검토 가능한 지식 기반이 낫습니다
+
+Mistral Vibe release notes는 Chat과 Work를 하나의 Vibe 경험으로 합치고, Agentic Knowledge Base를 public preview로 소개합니다.
+설명에서 중요한 표현은 flat memory가 아니라 browse, edit, trust 가능한 structured personal knowledge base입니다.
+
+agent memory는 강력하지만 오래된 사실과 일회성 추측을 계속 주입하면 사고가 납니다. 팀 단위 agent 운영에서는 memory를
+다음처럼 나누는 편이 안전합니다.
+
+| 메모리 종류 | 저장할 것 | 저장하지 않을 것 |
+|---|---|---|
+| team convention | 테스트 명령, PR 규칙, 배포 순서 | 개인 계정, secret, 내부 URL |
+| project fact | architecture decision, module owner, schema contract | 검증 안 된 장애 추정 |
+| workflow result | 지난 실행의 pass/fail와 남은 일 | 임시 로그 전체 |
+| eval learning | 자주 실패한 scenario와 rubric | 한 번 나온 감상 |
+
+## 본문에 넣지 않은 후보와 제외 이유
+
+- Anthropic Claude Code GitHub issues와 비공식 briefing은 화제성이 있었지만 공식 release note 접근성이 불안정했고,
+  단일 issue가 많아 이번 글의 근거로 삼지 않았습니다.
+- Meta Muse Spark 1.1은 agentic coding 관점에서 중요하지만 2026년 7월 공식 발표라 이번 주 운영 변화의 중심으로 쓰지 않았습니다.
+- Google Gemini Code Assist는 최근 release notes가 구매/마이그레이션 안내와 patch release 중심이라, 이번 글에서는 Mistral의
+  knowledge base와 GitHub/OpenAI의 workflow/eval 변화를 우선했습니다.
+- OpenAI HIPAA support flow는 2026년 10월 5일 공식 changelog에 있었지만 agent engineering보다 compliance onboarding 성격이
+  강해 본문 핵심 축에서 제외했습니다.
+
+## 이번 주 실험 과제
+
+1. 팀에서 반복되는 작업 하나를 골라 `workflow.yaml` 또는 작은 script로 단계와 출력 schema를 적습니다.
+2. agent가 개입할 단계마다 "도구 사용 가능", "사람 승인 필요", "금지"를 표시합니다.
+3. 최근 실패한 agent 작업 5개를 dataset으로 만들고, trace에서 tool 선택과 handoff 실패를 표시합니다.
+4. desktop computer use를 쓸 수 있다면 먼저 read-only 화면 요약만 허용하고, 저장/전송/삭제 동작은 승인 checkpoint로 남깁니다.
+5. agent run log에 model, tier, identifier, token, sandbox, approval 정보를 남기는 최소 JSON schema를 만듭니다.
+
+## 참고자료
+
+- [OpenAI API changelog](https://developers.openai.com/api/docs/changelog)
+- [OpenAI deprecations](https://developers.openai.com/api/docs/deprecations)
+- [OpenAI agent evaluation guide](https://developers.openai.com/api/docs/guides/agent-evals)
+- [GitHub Copilot dynamic workflows](https://github.blog/changelog/2026-10-01-dynamic-workflows-in-copilot-cli-and-the-copilot-app/)
+- [GitHub Copilot computer use](https://github.blog/changelog/2026-10-01-github-copilot-can-now-interact-with-desktop-apps/)
+- [GitHub Copilot code review API support](https://github.blog/changelog/2026-10-02-copilot-code-review-api-support-and-new-default-effort-level/)
+- [xAI release notes](https://docs.x.ai/developers/release-notes)
+- [Mistral release notes](https://docs.mistral.ai/resources/release-notes)

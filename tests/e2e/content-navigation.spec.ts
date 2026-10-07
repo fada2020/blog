@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /Agent 브라우저, 플랫폼 실행 경계, Kubernetes swap/ })
+    .getByRole("link", { name: /동적 워크플로우와 평가 전환/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/weekly-it-trends-2026-10-06\/$/,
+    /\/blog\/posts\/ai-agent-workflow-eval-governance-2026-10-07\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "2026년 10월 첫째 주 IT 기술동향: Agent 브라우저, 플랫폼 실행 경계, Kubernetes swap",
+    "AI agent 실전 운영: 동적 워크플로우와 평가 전환",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "브라우저 agent, private package 설치, 보안 sandbox 네트워크, Kubernetes node swap, 운영 검증표가 연결된 무텍스트 기술 동향 다이어그램",
+    "AI agent 작업이 동적 워크플로우, 평가 데이터셋, 데스크톱 승인, 사용량 정책, 감사 로그로 이어지는 무텍스트 운영 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /Agent 브라우저, 플랫폼 실행 경계, Kubernetes swap/,
+      name: /동적 워크플로우와 평가 전환/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /GestureDetector와 hit test 경계/,
+      name: /platform channel로 네이티브 API 연결하기/,
     }),
   ).toBeVisible();
 });
@@ -111,14 +111,14 @@ test("카테고리와 태그로 공개 글을 탐색할 수 있다", async ({ pa
   await expect(page).toHaveURL(/\/blog\/categories\/Frontend\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Frontend 글");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스물한째 걸음/ }),
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스물두째 걸음/ }),
   ).toBeVisible();
 
   await page.getByRole("link", { name: "#Flutter", exact: true }).first().click();
   await expect(page).toHaveURL(/\/blog\/tags\/Flutter\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("#Flutter");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스물한째 걸음/ }),
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스물두째 걸음/ }),
   ).toBeVisible();
 });
 
