@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /동적 워크플로우와 평가 전환/ })
+    .getByRole("link", { name: /성공 로그와 종단 검증/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/ai-agent-workflow-eval-governance-2026-10-07\/$/,
+    /\/blog\/posts\/deployment-evidence-ladder-retrospective-2026-10-08\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "AI agent 실전 운영: 동적 워크플로우와 평가 전환",
+    "배포 회고: 성공 로그와 종단 검증을 같은 말로 쓰지 않습니다",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "AI agent 작업이 동적 워크플로우, 평가 데이터셋, 데스크톱 승인, 사용량 정책, 감사 로그로 이어지는 무텍스트 운영 다이어그램",
+    "배포 증거가 커밋, 빌드, 배포, 헬스체크, 화면 검증, 종단 검증 단계로 쌓이는 무텍스트 DevOps 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /동적 워크플로우와 평가 전환/,
+      name: /성공 로그와 종단 검증/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /platform channel로 네이티브 API 연결하기/,
+      name: /StateFlow와 SharedFlow로 hot stream 경계/,
     }),
   ).toBeVisible();
 });
@@ -158,7 +158,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page).toHaveURL(/\/blog\/kinds\/learning\/page\/2\/$/);
   await expect(
     page.getByRole("link", {
-      name: "Spring Boot 개발자를 위한 Kotlin 열한째 걸음: by delegation으로 어댑터 경계 줄이기",
+      name: "Spring Boot 개발자를 위한 Kotlin 열두째 걸음: inline과 reified로 타입 경계 다루기",
     }),
   ).toBeVisible();
 });
