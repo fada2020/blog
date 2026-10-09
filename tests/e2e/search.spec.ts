@@ -9,15 +9,15 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(115);
+  expect(entries).toHaveLength(117);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "배포 회고: 성공 로그와 종단 검증을 같은 말로 쓰지 않습니다",
+    "25개월 아이 케어: 한글날 뒤 주말은 짧은 산책과 접종 체크로 보냅니다",
   );
   expect(entries[0].href).toBe(
-    "/blog/posts/deployment-evidence-ladder-retrospective-2026-10-08/",
+    "/blog/posts/toddler-hangeul-weekend-care-plan-2026-10-09/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });

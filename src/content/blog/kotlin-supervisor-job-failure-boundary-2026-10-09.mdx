@@ -1,0 +1,296 @@
+---
+title: "Spring Boot 개발자를 위한 Kotlin 스물한째 걸음: SupervisorJob으로 실패 격리 경계 세우기"
+description: "Java ExecutorService와 Spring 배치 작업에 익숙한 개발자를 위해 Kotlin SupervisorJob, supervisorScope, CoroutineExceptionHandler의 실패 전파 경계를 정리합니다."
+publishedAt: 2026-10-09T08:50:00+09:00
+draft: false
+category: "Backend"
+tags: ["Kotlin", "SupervisorJob", "Coroutines", "Spring Boot", "Concurrency"]
+kind: "learning"
+heroImage: "../../assets/blog/kotlin-supervisor-job-failure-boundary-2026-10-09/cover.webp"
+heroImageAlt: "Kotlin SupervisorJob이 요청 작업, 독립 자식 작업, 예외 처리 경계를 나누는 무텍스트 백엔드 학습 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 Kotlin 학습"
+lesson: 21
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 10월 9일에 Kotlin release process, Kotlin 2.4.20 릴리스 노트,
+> `kotlinx.coroutines` 1.11.0 API 문서의 `SupervisorJob`, `supervisorScope`,
+> `CoroutineScope`, `CoroutineExceptionHandler`와 coroutine exception handling 문서를 확인했습니다.
+> 기준 안정 버전은 `Kotlin 2.4.20`과 `kotlinx.coroutines 1.11.0`입니다.
+> EAP, Beta, RC 빌드는 안정 기능처럼 다루지 않습니다.
+
+## 결론부터 말하면
+
+지난 글에서 `StateFlow`와 `SharedFlow`로 서버 내부 상태와 이벤트 경계를 나눴다면, 오늘은 coroutine 실패가
+어디까지 번져야 하는지 다룹니다. Kotlin의 `SupervisorJob`은 "실패를 무시하는 Job"이 아닙니다.
+더 정확히는 **자식 coroutine 하나의 실패가 형제와 부모를 자동으로 취소하지 않게 만드는 실패 격리 경계**입니다.
+
+Spring Boot 개발자에게는 batch step, 독립 외부 API 호출, 알림 전송 fan-out, background worker pool을 떠올리면 됩니다.
+하나가 실패해도 나머지는 계속해야 하는 일이 있고, 하나가 실패하면 전체를 멈춰야 하는 일이 있습니다. `SupervisorJob`은
+첫 번째 경우에만 조심스럽게 씁니다.
+
+핵심은 네 가지입니다.
+
+- 기본 structured concurrency는 자식 실패를 부모로 올려 형제 작업까지 취소합니다.
+- `SupervisorJob`과 `supervisorScope`는 형제 작업 실패 격리를 표현합니다.
+- `launch`로 시작한 실패는 누군가 관찰하거나 `CoroutineExceptionHandler`로 처리해야 합니다.
+- `async`의 실패는 `await()`에서 드러나므로 결과 수집 정책을 코드로 적어야 합니다.
+
+## 이번 주 개념
+
+공식 API 문서에서 `SupervisorJob`은 자식들이 서로 독립적으로 실패할 수 있는 supervisor job을 만든다고 설명합니다.
+일반 `Job`의 자식이 실패하면 부모가 취소되고, 부모 취소는 형제에게 전파됩니다. 반면 supervisor 아래에서는 한 자식의
+실패가 곧바로 형제를 끌고 내려가지 않습니다.
+
+<Mermaid title="일반 Job과 SupervisorJob 실패 전파">
+{`flowchart LR
+  Parent["parent Job"] --> A["child A"]
+  Parent --> B["child B"]
+  A -->|fails| CancelParent["parent cancelled"]
+  CancelParent --> CancelB["child B cancelled"]
+
+  Supervisor["SupervisorJob"] --> SA["child A"]
+  Supervisor --> SB["child B"]
+  SA -->|fails| Handle["handle child failure"]
+  SB --> Continue["child B continues"]
+`}
+</Mermaid>
+
+`supervisorScope`는 현재 coroutine context를 바탕으로 새 scope를 만들되, 내부에 `SupervisorJob`을 둡니다.
+공식 문서는 caller가 취소되면 새 scope도 취소된다는 점을 함께 설명합니다. 즉 supervisor는 상위 취소를 막는 방패가 아니라,
+같은 scope 안 형제 실패를 분리하는 도구입니다.
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Java 서버에서는 비슷한 요구를 `ExecutorService`, `CompletableFuture`, Spring Batch, `@Async`로 처리했습니다.
+
+```java
+CompletableFuture<Profile> profile =
+    CompletableFuture.supplyAsync(() -> profileClient.fetch(userId), executor);
+
+CompletableFuture<Coupon> coupon =
+    CompletableFuture.supplyAsync(() -> couponClient.fetch(userId), executor)
+        .exceptionally(error -> Coupon.empty());
+
+Dashboard dashboard = new Dashboard(profile.join(), coupon.join());
+```
+
+쿠폰 조회 실패가 화면 전체 실패인지, 빈 쿠폰으로 내려도 되는지 업무적으로 정해야 합니다. 이 정책이 흐리면
+`try/catch`, `exceptionally`, timeout, 로그가 여기저기 흩어집니다.
+
+Kotlin coroutine에서도 같은 문제가 있습니다. `coroutineScope` 안의 `async`를 무조건 많이 띄우면 병렬화처럼 보이지만,
+실패 정책은 여전히 필요합니다. `SupervisorJob`은 그 정책을 숨기는 도구가 아니라 드러내는 도구입니다.
+
+## Kotlin에서는 무엇이 다른가
+
+`CoroutineScope`는 생명주기 묶음이고, 그 안의 `Job` 계층이 취소와 실패 전파를 결정합니다. 기본값은 보수적입니다.
+요청에 필요한 자식 작업 중 하나가 실패하면 전체 요청을 실패시키는 쪽이 안전합니다.
+
+```kotlin
+suspend fun strictDashboard(userId: String): Dashboard =
+    coroutineScope {
+        val profile = async { profileClient.fetch(userId) }
+        val payments = async { paymentClient.fetchRecent(userId) }
+
+        Dashboard(
+            profile = profile.await(),
+            payments = payments.await(),
+        )
+    }
+```
+
+반대로 부가 정보가 실패해도 핵심 응답은 줄 수 있다면 supervisor 경계를 별도로 둡니다.
+
+```kotlin
+suspend fun tolerantDashboard(userId: String): Dashboard =
+    supervisorScope {
+        val profile = async { profileClient.fetch(userId) }
+        val recommendations = async {
+            runCatching { recommendationClient.fetch(userId) }
+                .getOrElse { emptyList() }
+        }
+
+        Dashboard(
+            profile = profile.await(),
+            recommendations = recommendations.await(),
+        )
+    }
+```
+
+이 코드에서 supervisor가 모든 오류를 없애는 것은 아닙니다. `profile.await()`가 실패하면 함수는 실패합니다.
+다만 추천 조회 실패를 `runCatching`으로 업무 기본값에 매핑했기 때문에, 어떤 실패를 감당할지 코드가 말해 줍니다.
+
+## 대응 개념 비교
+
+| Java/Spring 습관 | Kotlin coroutine 표현 | 판단 기준 |
+|---|---|---|
+| 하나 실패하면 전체 rollback | `coroutineScope` | 핵심 데이터가 모두 필요할 때 |
+| 독립 작업 일부 실패 허용 | `supervisorScope` | 형제 작업을 계속할 가치가 있을 때 |
+| `CompletableFuture.exceptionally` | `runCatching` + 명시 기본값 | 실패를 업무 상태로 바꿀 때 |
+| worker pool root | `CoroutineScope(SupervisorJob() + handler)` | application lifecycle에서 관리할 때 |
+| 로그만 찍는 `@Async` | `launch` + handler + 추적 ID | 결과가 없어도 실패 관측이 필요할 때 |
+
+Spring Boot에서 특히 조심할 부분은 request scope와 application scope를 섞지 않는 것입니다. HTTP 요청이 취소되면
+그 요청에 묶인 supervisor도 취소되어야 합니다. 반대로 요청 밖으로 넘길 작업은 DB outbox, queue, scheduler,
+또는 명시적인 application scope로 보내고 종료 처리까지 설계해야 합니다.
+
+## 최소 실행 예제
+
+아래 예제는 핵심 profile 조회는 반드시 성공해야 하지만, 추천 목록은 실패해도 빈 목록으로 내려도 되는 dashboard입니다.
+
+```kotlin
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.supervisorScope
+
+data class Profile(
+    val userId: String,
+    val displayName: String,
+)
+
+data class Dashboard(
+    val profile: Profile,
+    val recommendations: List<String>,
+)
+
+class ProfileClient {
+    suspend fun fetch(userId: String): Profile {
+        delay(80)
+        return Profile(userId, "member")
+    }
+}
+
+class RecommendationClient {
+    suspend fun fetch(userId: String): List<String> {
+        delay(120)
+        error("recommendation service timeout")
+    }
+}
+
+class DashboardService(
+    private val profileClient: ProfileClient,
+    private val recommendationClient: RecommendationClient,
+) {
+    suspend fun load(userId: String): Dashboard =
+        supervisorScope {
+            val profile = async {
+                profileClient.fetch(userId)
+            }
+            val recommendations = async {
+                runCatching {
+                    recommendationClient.fetch(userId)
+                }.getOrElse { emptyList() }
+            }
+
+            Dashboard(
+                profile = profile.await(),
+                recommendations = recommendations.await(),
+            )
+        }
+}
+```
+
+중요한 점은 추천 실패를 조용히 삼킨 것이 아니라, 빈 추천 목록이라는 업무 결정을 코드에 남겼다는 점입니다.
+운영 코드라면 여기에서 metric, structured log, trace event도 함께 남겨야 합니다.
+
+`launch`를 쓰는 worker에서는 예외 처리 위치가 더 선명해야 합니다.
+
+```kotlin
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+
+class NotificationWorker(
+    private val sender: NotificationSender,
+) {
+    private val exceptionHandler = CoroutineExceptionHandler { _, error ->
+        // 실제 서비스에서는 structured log와 metric으로 보냅니다.
+        println("notification worker failed: ${error.message}")
+    }
+
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO + exceptionHandler,
+    )
+
+    fun sendLater(message: NotificationMessage) {
+        scope.launch {
+            sender.send(message)
+        }
+    }
+}
+```
+
+이 예제는 application scope를 단순화해서 보여 줍니다. 실제 Spring Boot 애플리케이션에서는 bean lifecycle에 맞춰
+scope를 닫고, 종료 시 진행 중인 작업을 기다릴지 취소할지 결정해야 합니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫째, "`SupervisorJob`을 쓰면 예외가 안전하게 처리된다"는 오해입니다. supervisor는 실패 전파를 바꿉니다.
+예외를 기록하고, 알리고, 업무 상태로 바꾸는 일은 여전히 별도로 해야 합니다.
+
+둘째, "`CoroutineExceptionHandler`는 모든 예외를 잡는 try/catch다"라는 오해입니다. `async`의 예외는 결과를
+`await()`할 때 드러납니다. handler는 root 또는 supervisor 아래 `launch` 예외 관측에서 특히 중요합니다.
+
+셋째, "요청 안 supervisor는 요청 취소를 무시한다"는 오해입니다. `supervisorScope`도 상위 caller가 취소되면 취소됩니다.
+사용자 요청이 끊겼는데 계속해야 하는 작업은 요청 scope 밖의 queue나 별도 lifecycle로 넘겨야 합니다.
+
+넷째, "일부 실패 허용은 언제나 사용자 경험을 좋게 한다"는 오해입니다. 결제, 권한, 재고, 의료 기록처럼 핵심 정합성이
+필요한 데이터는 부분 성공으로 감추면 더 큰 장애가 됩니다.
+
+## 연습 문제
+
+다음 요구사항을 두 가지 방식으로 나눠 보세요.
+
+```text
+1. 회원 profile은 반드시 필요하다.
+2. 최근 주문 목록도 반드시 필요하다.
+3. 추천 상품은 실패해도 빈 목록이면 된다.
+4. 추천 실패는 metric에 남긴다.
+5. 요청이 취소되면 모든 진행 중 작업도 취소한다.
+```
+
+힌트는 이렇습니다.
+
+```kotlin
+supervisorScope {
+    val profile = async { profileClient.fetch(userId) }
+    val orders = async { orderClient.fetchRecent(userId) }
+    val recommendations = async {
+        runCatching { recommendationClient.fetch(userId) }
+            .onFailure { metrics.increment("recommendation.failure") }
+            .getOrElse { emptyList() }
+    }
+
+    Dashboard(
+        profile = profile.await(),
+        orders = orders.await(),
+        recommendations = recommendations.await(),
+    )
+}
+```
+
+여기서 `profile`이나 `orders`가 실패하면 전체 응답은 실패합니다. 추천 실패만 업무적으로 낮은 중요도로 분류했습니다.
+이 구분이 바로 supervisor를 쓸지 말지의 기준입니다.
+
+## 다음에 확인할 것
+
+다음 Kotlin 글에서는 coroutine과 Spring transaction, thread-local context, MDC 같은 서버 운영 경계를 더 구체적으로
+다룰 차례입니다. 오늘 기억할 문장은 하나입니다.
+
+**SupervisorJob은 실패를 숨기는 기능이 아니라 실패가 번지는 범위를 설계하는 기능입니다.**
+
+## 참고자료
+
+- [Kotlin release process](https://kotlinlang.org/docs/releases.html)
+- [What's new in Kotlin 2.4.20](https://kotlinlang.org/docs/whatsnew2420.html)
+- [kotlinx.coroutines SupervisorJob API](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-supervisor-job.html)
+- [kotlinx.coroutines supervisorScope API](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/supervisor-scope.html)
+- [kotlinx.coroutines CoroutineScope API](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-coroutine-scope/)
+- [Coroutine exception handling](https://github.com/Kotlin/kotlinx.coroutines/blob/master/docs/topics/exception-handling.md)
