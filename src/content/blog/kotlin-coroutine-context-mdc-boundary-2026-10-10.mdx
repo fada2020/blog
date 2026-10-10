@@ -1,0 +1,273 @@
+---
+title: "Spring Boot 개발자를 위한 Kotlin 스물두째 걸음: CoroutineContext와 MDC 경계 세우기"
+description: "Java ThreadLocal과 Spring 요청 로그에 익숙한 개발자를 위해 Kotlin CoroutineContext, dispatcher, ThreadLocal, MDCContext의 전파 경계를 정리합니다."
+publishedAt: 2026-10-10T08:50:00+09:00
+draft: false
+category: "Backend"
+tags: ["Kotlin", "Coroutines", "MDC", "Spring Boot", "Observability"]
+kind: "learning"
+heroImage: "../../assets/blog/kotlin-coroutine-context-mdc-boundary-2026-10-10/cover.webp"
+heroImageAlt: "Kotlin CoroutineContext가 dispatcher, Job, CoroutineName, MDC 경계를 나누어 Spring Boot 로그 문맥으로 이어지는 무텍스트 백엔드 학습 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 Kotlin 학습"
+lesson: 22
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 10월 10일에 Kotlin 공식 문서의 최신 안정 버전, Kotlin 2.4.20 릴리스 노트,
+> `kotlinx.coroutines` 1.11.0 API 문서의 `CoroutineScope`, `coroutineContext`,
+> `CoroutineName`, `asContextElement`, `ThreadContextElement`, `withContext`와
+> `kotlinx-coroutines-slf4j`의 `MDCContext` 문서를 확인했습니다.
+> 기준 안정 버전은 `Kotlin 2.4.20`과 `kotlinx.coroutines 1.11.0`입니다.
+> EAP, Beta, RC 빌드는 안정 기능처럼 다루지 않습니다.
+
+## 결론부터 말하면
+
+지난 글에서 `SupervisorJob`으로 실패가 번지는 범위를 나눴다면, 오늘은 coroutine이 **어떤 실행 문맥에서 돈다**는
+사실을 다룹니다. Spring Boot 개발자에게 가장 익숙한 비유는 `ThreadLocal`, SLF4J MDC, request id, transaction
+boundary입니다.
+
+Kotlin의 `CoroutineContext`는 단순한 map이 아닙니다. dispatcher, `Job`, 이름, 예외 처리기, thread-local 전파 규칙이
+들어 있는 실행 문맥입니다. 문제는 coroutine이 같은 logical request 안에 있어도 여러 thread를 오갈 수 있다는 점입니다.
+그래서 Java에서 자연스럽던 `ThreadLocal` 감각을 그대로 가져오면 로그 추적 ID가 사라지거나, 반대로 오래된 값이 남을 수 있습니다.
+
+핵심은 네 가지입니다.
+
+- `CoroutineContext`는 `Job`, dispatcher, 이름, context element를 조합합니다.
+- `ThreadLocal` 값은 coroutine context element로 명시적으로 옮겨야 합니다.
+- SLF4J MDC는 `MDCContext`로 capture하되, 중간 변경은 다시 capture하지 않으면 사라질 수 있습니다.
+- Spring transaction, security context, request scope는 "thread에 있겠지"가 아니라 전파 정책을 확인해야 합니다.
+
+## 이번 주 개념
+
+공식 API 문서는 `CoroutineScope`의 context가 dispatcher나 예외 처리처럼 coroutine 실행에 영향을 주는 속성을 담는다고 설명합니다.
+또 structured concurrency를 위해 `GlobalScope`를 제외한 scope context에는 `Job`이 있어야 한다고 말합니다.
+
+<Mermaid title="CoroutineContext가 들고 있는 실행 문맥">
+{`flowchart LR
+  Scope["CoroutineScope"] --> Context["CoroutineContext"]
+  Context --> Job["Job: lifecycle"]
+  Context --> Dispatcher["Dispatcher: thread selection"]
+  Context --> Name["CoroutineName: debug label"]
+  Context --> ThreadLocal["ThreadContextElement"]
+  ThreadLocal --> MDC["MDCContext / asContextElement"]
+  Dispatcher --> Work["suspend / resume on threads"]
+`}
+</Mermaid>
+
+`CoroutineContext`는 `+` 연산자로 element를 합칩니다. 같은 key의 element가 있으면 오른쪽 값이 우선합니다.
+그래서 `withContext(Dispatchers.IO + MDCContext())`처럼 문맥을 좁혀 바꿀 수 있고, 호출이 끝나면 원래 context로 돌아옵니다.
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Spring MVC 기반 서버에서는 요청 하나가 thread 하나를 오래 붙잡는 모델에 익숙했습니다. 필터에서 request id를 MDC에 넣고,
+controller, service, repository 로그가 같은 thread에서 찍히면 추적이 자연스럽게 이어졌습니다.
+
+```java
+class RequestIdFilter extends OncePerRequestFilter {
+    @Override
+    protected void doFilterInternal(
+        HttpServletRequest request,
+        HttpServletResponse response,
+        FilterChain chain
+    ) throws ServletException, IOException {
+        MDC.put("requestId", request.getHeader("X-Request-Id"));
+        try {
+            chain.doFilter(request, response);
+        } finally {
+            MDC.clear();
+        }
+    }
+}
+```
+
+하지만 `@Async`, scheduler, Reactor, servlet async, coroutine을 섞으면 이야기가 달라집니다. logical request와 physical thread가
+분리됩니다. MDC가 "요청 문맥"처럼 보였지만 실제 저장 위치는 thread-local입니다.
+
+## Kotlin에서는 무엇이 다른가
+
+Coroutine은 suspend 지점에서 멈췄다가 나중에 다른 thread에서 재개될 수 있습니다. 그래서 아래 코드는 겉보기에는 한 함수지만,
+`fetchProfile`과 `fetchOrders`가 항상 같은 thread에서 돈다고 볼 수 없습니다.
+
+```kotlin
+suspend fun loadDashboard(userId: String): Dashboard = coroutineScope {
+    val profile = async(Dispatchers.IO) { profileClient.fetch(userId) }
+    val orders = async(Dispatchers.IO) { orderClient.fetchRecent(userId) }
+
+    Dashboard(
+        profile = profile.await(),
+        orders = orders.await(),
+    )
+}
+```
+
+이때 추적 ID가 MDC에만 있고 context element로 옮기지 않았다면, 로그가 일부 coroutine에서 비어 보일 수 있습니다.
+반대로 worker thread에 이전 요청 MDC가 남아 있으면 더 위험합니다. 그래서 coroutine boundary에서는 "값을 어디서 capture하고
+언제 clear할지"를 코드로 표현해야 합니다.
+
+## 대응 개념 비교
+
+| Java/Spring 습관 | Kotlin coroutine 표현 | 조심할 점 |
+|---|---|---|
+| 요청 thread의 MDC | `MDCContext()` | capture 시점 이후 MDC 변경은 자동 추적되지 않음 |
+| `ThreadLocal<T>` | `threadLocal.asContextElement(value)` | element 없이 접근하면 값이 정의되지 않을 수 있음 |
+| `ExecutorService` 선택 | `Dispatchers.IO`, custom dispatcher | blocking 작업 위치를 명시해야 함 |
+| 로그 구분용 thread name | `CoroutineName` | 이름은 추적 보조 정보이지 보안 경계가 아님 |
+| `@Transactional` thread binding | suspend 지원 여부와 transaction manager 확인 | 임의 dispatcher 전환이 transaction 문맥을 깨뜨릴 수 있음 |
+
+Spring Boot 서비스에서 특히 중요한 것은 transaction과 security context입니다. coroutine 지원이 있는 stack을 쓰더라도,
+라이브러리마다 context 전파 정책이 다릅니다. DB transaction 안에서 `withContext(Dispatchers.IO)`를 무심코 추가하기보다,
+현재 framework가 suspend transaction을 어떻게 묶는지 먼저 확인해야 합니다.
+
+## 최소 실행 예제
+
+아래 예제는 request id를 MDC에 넣고 coroutine fan-out으로 이어 가는 최소 형태입니다. 핵심은 coroutine을 시작할 때
+`MDCContext()`로 현재 MDC snapshot을 capture한다는 점입니다.
+
+```kotlin
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.slf4j.MDCContext
+import org.slf4j.LoggerFactory
+import org.slf4j.MDC
+
+data class Dashboard(
+    val profile: Profile,
+    val orders: List<Order>,
+)
+
+class DashboardService(
+    private val profileClient: ProfileClient,
+    private val orderClient: OrderClient,
+) {
+    private val log = LoggerFactory.getLogger(javaClass)
+
+    suspend fun load(userId: String, requestId: String): Dashboard {
+        MDC.put("requestId", requestId)
+
+        return try {
+            coroutineScope {
+                val context = MDCContext()
+
+                val profile = async(context) {
+                    log.info("profile fetch started")
+                    profileClient.fetch(userId)
+                }
+
+                val orders = async(context) {
+                    log.info("orders fetch started")
+                    orderClient.fetchRecent(userId)
+                }
+
+                Dashboard(
+                    profile = profile.await(),
+                    orders = orders.await(),
+                )
+            }
+        } finally {
+            MDC.remove("requestId")
+        }
+    }
+}
+```
+
+이 코드는 설명용으로 단순화했습니다. 실제 HTTP 서버에서는 filter나 interceptor가 request id를 넣고 지우는 역할을 맡는 편이
+일반적입니다. coroutine 안에서 새 MDC 값을 추가했다면 그 지점에서 다시 `withContext(MDCContext())`를 사용해야 다음 suspend 이후에도
+그 변경이 유지됩니다.
+
+```kotlin
+import kotlinx.coroutines.slf4j.MDCContext
+import kotlinx.coroutines.withContext
+import org.slf4j.MDC
+
+suspend fun enrichAuditLog(action: String) {
+    MDC.put("auditAction", action)
+
+    withContext(MDCContext()) {
+        auditClient.send(action)
+        // suspend 이후에도 auditAction이 필요한 구간을 이 블록으로 좁힙니다.
+    }
+
+    MDC.remove("auditAction")
+}
+```
+
+`ThreadLocal`을 직접 전파해야 하는 경우도 있습니다.
+
+```kotlin
+import kotlinx.coroutines.withContext
+
+val tenantContext = ThreadLocal<String>()
+
+suspend fun <T> withTenant(tenantId: String, block: suspend () -> T): T =
+    withContext(tenantContext.asContextElement(tenantId)) {
+        block()
+    }
+```
+
+공식 API 문서는 `asContextElement`가 thread-local 변경을 추적하지 않는다고 경고합니다. 즉 block 안에서
+`tenantContext.set("other")`를 해도 자동으로 coroutine context에 반영되는 구조가 아닙니다. 가능하면 thread-local을 직접 수정하기보다
+명시적인 함수 인자나 domain context 객체로 넘기는 편이 테스트와 운영에 더 안전합니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫째, "`CoroutineContext`는 request attribute 같은 전역 저장소다"라는 오해입니다. context는 coroutine 실행 속성의 조합입니다.
+업무 데이터를 아무 값이나 넣는 곳이 아니라, 전파 정책이 필요한 실행 문맥만 신중히 넣어야 합니다.
+
+둘째, "MDC는 한 번 넣으면 suspend 이후에도 계속 남는다"는 오해입니다. coroutine이 다른 thread에서 재개되면 thread-local 기반 MDC는
+명시적 context element 없이는 기대한 값을 보장하지 않습니다.
+
+셋째, "`MDCContext`를 쓰면 블록 안 변경도 자동 추적된다"는 오해입니다. `MDCContext`는 capture 시점의 snapshot을 옮깁니다.
+중간에 값을 추가했다면 새 snapshot을 다시 만들어야 합니다.
+
+넷째, "dispatcher 전환은 성능 최적화일 뿐이다"라는 오해입니다. dispatcher 전환은 transaction, security, logging, resource cleanup의
+문맥 경계를 바꿀 수 있습니다. 특히 Spring transaction 안에서 임의로 thread를 바꾸는 코드는 먼저 작동 방식을 검증해야 합니다.
+
+## 연습 문제
+
+아래 요구사항을 읽고 MDC에 넣을 값과 함수 인자로 넘길 값을 나눠 보세요.
+
+```text
+1. 모든 로그에는 requestId가 있어야 한다.
+2. 감사 로그에는 auditAction이 있어야 한다.
+3. 결제 요청은 tenantId별 정책으로 검증해야 한다.
+4. 결제 금액과 사용자 권한은 업무 로직에서 테스트 가능해야 한다.
+5. 외부 API 호출은 Dispatchers.IO에서 실행한다.
+```
+
+힌트는 이렇습니다.
+
+```kotlin
+suspend fun approvePayment(
+    tenantId: String,
+    command: ApprovePaymentCommand,
+): PaymentResult =
+    withTenant(tenantId) {
+        withContext(MDCContext() + Dispatchers.IO) {
+            paymentClient.approve(command)
+        }
+    }
+```
+
+`requestId`와 `auditAction`은 로그 문맥입니다. `tenantId`, 금액, 권한은 업무 판단에 직접 쓰이므로 가능하면 명시 인자나 command로
+남기는 편이 좋습니다. 그래야 coroutine 전파 문제와 domain rule을 분리해서 테스트할 수 있습니다.
+
+## 다음에 확인할 것
+
+다음 Kotlin 글에서는 coroutine과 Spring transaction, rollback, outbox 경계를 더 좁혀 보겠습니다. 오늘 기억할 문장은 하나입니다.
+
+**CoroutineContext는 값을 숨겨 두는 주머니가 아니라 실행 문맥의 전파 규칙을 선언하는 자리입니다.**
+
+## 참고자료
+
+- [Kotlin docs - latest stable version](https://kotlinlang.org/docs/home.html)
+- [What's new in Kotlin 2.4.20](https://kotlinlang.org/docs/whatsnew2420.html)
+- [kotlinx.coroutines CoroutineScope API](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-coroutine-scope/)
+- [kotlinx.coroutines coroutineContext API](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-coroutine-scope/coroutine-context.html)
+- [kotlinx.coroutines CoroutineName API](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-coroutine-name/)
+- [kotlinx.coroutines asContextElement API](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/as-context-element.html)
+- [kotlinx-coroutines-slf4j MDCContext API](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-slf4j/)

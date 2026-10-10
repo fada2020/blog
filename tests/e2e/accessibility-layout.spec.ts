@@ -137,7 +137,7 @@ test("홈의 주요 링크와 테마 버튼에 키보드 초점이 표시된다"
   await expectKeyboardFocusOutline(page, page.getByRole("link", { name: "Field Notes" }));
   await expectKeyboardFocusOutline(
     page,
-    page.getByRole("link", { name: /한글날 뒤 주말은 짧은 산책/ }),
+    page.getByRole("link", { name: /긴 금리, 원화 기준점, 반도체 기대/ }),
   );
   await expectKeyboardFocusOutline(page, page.getByRole("button", { name: "테마 전환" }));
 });

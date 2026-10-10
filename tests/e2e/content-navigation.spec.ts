@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /한글날 뒤 주말은 짧은 산책/ })
+    .getByRole("link", { name: /긴 금리, 원화 기준점, 반도체 기대/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/toddler-hangeul-weekend-care-plan-2026-10-09\/$/,
+    /\/blog\/posts\/saturday-market-long-yields-fx-chip-2026-10-10\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "25개월 아이 케어: 한글날 뒤 주말은 짧은 산책과 접종 체크로 보냅니다",
+    "토요일 주식 학습: 긴 금리, 원화 기준점, 반도체 기대 분리하기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "25개월 아이의 한글날 뒤 주말을 날씨, 예방접종, 손 씻기, 짧은 산책, 낮잠 기준으로 나누어 보는 무텍스트 다이어그램",
+    "미국 10년물과 30년물 금리, 달러 원 기준점, KOSPI 조정, 한국 반도체 수출을 네 칸으로 나누는 무텍스트 시장 점검 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /한글날 뒤 주말은 짧은 산책/,
+      name: /긴 금리, 원화 기준점, 반도체 기대/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /SupervisorJob으로 실패 격리 경계/,
+      name: /CoroutineContext와 MDC 경계/,
     }),
   ).toBeVisible();
 });
@@ -158,7 +158,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page).toHaveURL(/\/blog\/kinds\/learning\/page\/2\/$/);
   await expect(
     page.getByRole("link", {
-      name: "Spring Boot 개발자를 위한 Kotlin 열셋째 걸음: annotation target을 명시해 프레임워크 경계 지키기",
+      name: "Spring Boot 개발자를 위한 Kotlin 열넷째 걸음: contracts로 smart cast 경계 읽기",
     }),
   ).toBeVisible();
 });
