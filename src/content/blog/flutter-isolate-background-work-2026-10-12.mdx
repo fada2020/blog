@@ -1,0 +1,226 @@
+---
+title: "Spring Boot 개발자를 위한 Flutter 스물셋째 걸음: isolate로 무거운 작업 분리하기"
+description: "Spring Boot의 worker thread와 message queue 감각에 빗대어 Flutter main isolate, Isolate.run, compute, message copy, UI jank 경계를 정리합니다."
+publishedAt: 2026-10-12T00:03:00+09:00
+draft: false
+category: "Frontend"
+tags: ["Flutter", "Dart", "Spring Boot", "Performance", "Isolate"]
+kind: "learning"
+heroImage: "../../assets/blog/flutter-isolate-background-work-2026-10-12/cover.webp"
+heroImageAlt: "Flutter main isolate, helper isolate, message copy, UI frame budget이 분리된 무텍스트 성능 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 모바일 앱 학습"
+lesson: 23
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 10월 12일 KST 기준으로 Flutter SDK archive JSON, Flutter concurrency and isolates 문서,
+> Flutter background parsing cookbook, Dart `Isolate.run` API 문서, Flutter `compute` API 문서를 확인했습니다.
+> SDK archive의 stable channel은 Flutter 3.47.7, Dart 3.13.5를 가리켰습니다. 이 글은 stable channel의 공개 API를
+> 기준으로 하며 beta, dev, main channel 기능을 안정 기능처럼 설명하지 않습니다.
+
+## 결론부터 말하면
+
+Flutter에서 isolate는 "비동기 함수 하나 더 만들기"가 아니라 **UI frame budget을 지키기 위해 CPU 작업의 소유권을 분리하는 방법**입니다.
+네트워크 요청처럼 기다리는 일은 `Future`만으로 충분할 때가 많습니다. 하지만 큰 JSON 파싱, 이미지 메타데이터 분석, 암호화, 압축처럼
+CPU를 오래 쓰는 작업은 main isolate를 막아 화면이 끊길 수 있습니다.
+
+Spring Boot 개발자에게 비유하면 `CompletableFuture`와 worker pool을 떠올릴 수 있습니다. 다만 Dart isolate는 thread처럼
+heap을 공유하지 않습니다. 서로 메시지를 주고받고, 보낼 수 있는 값과 복사 비용을 함께 설계해야 합니다.
+
+## 이번 주 개념
+
+Flutter 공식 문서는 기본적으로 앱 코드가 main isolate에서 실행되며, 큰 계산이 UI jank를 만들 수 있을 때 helper isolate로
+옮길 수 있다고 설명합니다. Dart isolate는 각자 memory와 event loop를 갖고, 공유 상태가 아니라 message passing으로 통신합니다.
+
+| Flutter/Dart 개념 | 역할 | Spring Boot에 비유하면 |
+|---|---|---|
+| main isolate | widget build, input, animation callback 처리 | servlet request thread보다 더 민감한 UI thread |
+| helper isolate | CPU heavy work를 따로 실행 | worker executor의 작업 단위 |
+| `Isolate.run` | 짧은 계산을 새 isolate에서 실행하고 종료 | 일회성 background job |
+| `compute` | Flutter에서 message 하나를 넘겨 계산 | mobile/web 호환을 고려한 helper |
+| message copy | isolate 사이 값 전달 비용 | queue payload 직렬화 비용 |
+| long-lived isolate | 반복 작업용 worker | 상시 worker process 또는 consumer |
+
+<Mermaid title="Flutter isolate 작업 분리">
+{`flowchart LR
+  UI["main isolate: UI frame"] --> Decision["16ms를 넘는 CPU 작업인가"]
+  Decision -->|아니오| Await["Future와 async로 충분"]
+  Decision -->|예| Worker["helper isolate"]
+  Worker --> Compute["JSON parse / image scan / crypto"]
+  Compute --> Result["작은 결과 DTO"]
+  Result --> UI
+`}
+</Mermaid>
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Spring Boot에서는 요청 thread에서 오래 걸리는 CPU 작업을 그대로 돌리면 latency가 튑니다. 그래서 executor, queue, batch job으로
+작업을 분리합니다. 하지만 Java worker는 같은 heap을 볼 수 있으므로 shared mutable state 문제가 생깁니다.
+
+```java
+@Service
+class ReportParser {
+    private final ExecutorService workers = Executors.newFixedThreadPool(4);
+
+    CompletableFuture<ReportSummary> parseAsync(String json) {
+        return CompletableFuture.supplyAsync(() -> parse(json), workers);
+    }
+}
+```
+
+Flutter의 isolate는 이보다 더 actor model에 가깝습니다. helper isolate는 main isolate의 `BuildContext`, `State`,
+controller, stream subscription을 직접 만지지 못합니다. 이 제약이 처음에는 불편하지만 UI 상태와 background 계산이 섞이는 실수를
+줄여 줍니다.
+
+## Flutter에서는 무엇이 다른가
+
+Flutter cookbook은 큰 JSON 문서를 파싱하고 객체로 바꾸는 작업이 16ms를 넘으면 jank를 만들 수 있으므로 별도 isolate로 옮기라고
+안내합니다. `Isolate.run`은 새 isolate를 만들고 callback을 실행한 뒤 결과를 돌려주고 종료합니다.
+
+```dart
+import 'dart:convert';
+import 'dart:isolate';
+
+Future<List<OrderRow>> parseOrders(String responseBody) {
+  return Isolate.run(() {
+    final rows = jsonDecode(responseBody) as List<Object?>;
+    return rows
+        .cast<Map<String, Object?>>()
+        .map(OrderRow.fromJson)
+        .toList(growable: false);
+  });
+}
+
+class OrderRow {
+  const OrderRow({required this.id, required this.amount});
+
+  final String id;
+  final int amount;
+
+  factory OrderRow.fromJson(Map<String, Object?> json) {
+    return OrderRow(
+      id: json['id']! as String,
+      amount: json['amount']! as int,
+    );
+  }
+}
+```
+
+이 코드는 "API 호출"을 isolate로 옮긴 것이 아닙니다. 이미 받은 문자열을 객체로 바꾸는 CPU 작업을 옮긴 것입니다. 네트워크 대기는
+운영체제와 runtime이 이미 비동기로 처리하므로 보통 isolate가 필요하지 않습니다.
+
+## `compute`와 `Isolate.run` 고르기
+
+Flutter의 `compute` 문서는 native platform에서 `await compute(fun, message)`가 `await Isolate.run(() => fun(message))`와
+동등하다고 설명합니다. web target까지 함께 고려하는 앱에서는 `compute`가 편합니다. 순수 Dart 코드나 더 직접적인 표현을 원하면
+`Isolate.run`이 읽기 쉽습니다.
+
+```dart
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+
+Future<List<OrderRow>> parseOrdersForFlutter(String responseBody) {
+  return compute(_parseOrders, responseBody);
+}
+
+List<OrderRow> _parseOrders(String responseBody) {
+  final rows = jsonDecode(responseBody) as List<Object?>;
+  return rows
+      .cast<Map<String, Object?>>()
+      .map(OrderRow.fromJson)
+      .toList(growable: false);
+}
+```
+
+`compute`에 넘기는 함수는 top-level 또는 static처럼 isolate가 실행할 수 있는 형태로 두는 편이 안전합니다. closure가 예상치 못한
+큰 객체를 캡처하면 copy 비용이 커지거나, 보낼 수 없는 객체 때문에 runtime failure가 날 수 있습니다.
+
+## isolate에 보내면 안 되는 것
+
+Spring에서 queue message에 `EntityManager`, `HttpServletRequest`, open socket을 넣지 않는 것과 같습니다. Flutter에서도 helper
+isolate에는 계산에 필요한 작은 값만 넘깁니다.
+
+| 보내기 좋은 값 | 피해야 할 값 |
+|---|---|
+| `String`, `int`, `double`, `bool` | `BuildContext` |
+| `List`와 `Map` 기반 DTO | `State`, `AnimationController` |
+| JSON 문자열, byte 배열 | open stream, socket, platform channel handle |
+| 결과 summary DTO | service locator 전체, repository instance |
+
+isolate는 성능 마법이 아닙니다. 큰 객체를 복사해서 넘기고 다시 큰 결과를 받으면 main isolate를 직접 막는 것보다 느릴 수도 있습니다.
+핵심은 "작업 시간"과 "메시지 전달 비용"을 같이 보는 것입니다.
+
+## 짧은 작업과 긴 작업을 나누기
+
+한 번 큰 파일을 파싱하는 정도라면 `Isolate.run`이나 `compute`가 충분합니다. 같은 계산을 초당 여러 번 반복한다면 매번 isolate를
+새로 만드는 overhead가 커질 수 있습니다. Flutter 문서는 이런 경우 long-lived isolate와 port를 검토하라고 안내합니다.
+
+| 상황 | 권장 판단 |
+|---|---|
+| 화면 진입 시 20MB JSON 1회 파싱 | `Isolate.run` 또는 `compute` |
+| 사용자가 버튼을 누를 때 작은 정렬 1회 | main isolate에서 처리 후 측정 |
+| 이미지 여러 장을 계속 분석 | long-lived worker 검토 |
+| platform API나 UI 권한 dialog | isolate가 아니라 main/platform thread 규칙 확인 |
+| web까지 같은 코드 유지 | `compute`부터 검토 |
+
+처음부터 worker framework를 만들 필요는 없습니다. 먼저 DevTools Performance view로 jank 구간을 확인하고, 실제로 CPU work가
+frame을 막는 구간만 isolate로 옮기는 편이 유지보수에 좋습니다.
+
+## 화면 상태 업데이트 경계
+
+helper isolate는 UI를 직접 바꾸지 않습니다. 결과를 받은 main isolate가 `mounted`를 확인하고 state를 갱신합니다.
+
+```dart
+class OrdersPageState extends State<OrdersPage> {
+  late Future<List<OrderRow>> _orders;
+
+  @override
+  void initState() {
+    super.initState();
+    _orders = loadOrders();
+  }
+
+  Future<List<OrderRow>> loadOrders() async {
+    final responseBody = await widget.client.fetchOrders();
+    return parseOrdersForFlutter(responseBody);
+  }
+}
+```
+
+여기서 `client.fetchOrders()`는 비동기 I/O이고, `parseOrdersForFlutter()`는 CPU 작업입니다. 두 단계를 분리하면 timeout,
+retry, parsing error, UI loading state를 각각 테스트하기 쉬워집니다.
+
+## Java 개발자가 자주 하는 오해
+
+1. **"`async`를 붙이면 CPU 작업도 자동으로 다른 thread에서 돈다."**  
+   Dart의 `async`는 기다림을 표현할 뿐입니다. CPU loop가 길면 main isolate를 계속 점유할 수 있습니다.
+
+2. **"isolate는 Java thread pool과 같다."**  
+   isolate는 memory를 공유하지 않습니다. shared singleton이나 mutable cache를 직접 같이 쓰는 설계가 아닙니다.
+
+3. **"모든 parsing을 isolate로 보내야 한다."**  
+   작은 JSON은 복사와 spawn overhead가 더 클 수 있습니다. 먼저 frame drop과 처리 시간을 측정합니다.
+
+4. **"helper isolate에서 UI service를 부르면 된다."**  
+   `BuildContext`, widget lifecycle, platform UI 호출은 main isolate와 platform thread 규칙을 지켜야 합니다.
+
+## 연습 문제
+
+1. REST 응답 5,000개 row를 받아 화면에 보여 주는 예제를 만들고, main isolate parsing과 `compute` parsing의 체감 차이를
+   DevTools Performance view에서 비교해 보세요.
+2. `OrderRow.fromJson`이 예외를 던질 때 UI에 어떤 error state를 보여 줄지 정리해 보세요.
+3. isolate에 넘기는 message를 `String responseBody` 하나에서 `{tenantId, responseBody}` 형태로 바꿀 때 어떤 값까지
+   포함해도 되는지 선을 그어 보세요.
+
+## 참고자료
+
+- [Flutter - Flutter SDK archive](https://docs.flutter.dev/install/archive)
+- [Flutter - Concurrency and isolates](https://docs.flutter.dev/perf/isolates)
+- [Flutter cookbook - Parse JSON in the background](https://docs.flutter.dev/cookbook/networking/background-parsing)
+- [Dart API - Isolate.run](https://api.flutter.dev/flutter/dart-isolate/Isolate/run.html)
+- [Flutter API - compute](https://api.flutter.dev/flutter/foundation/compute.html)
