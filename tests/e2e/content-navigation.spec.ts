@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /기회비용과 유동성으로 돈 묶는 기간/ })
+    .getByRole("link", { name: /Node 관측성, Lambda AZ locality, agent 정책 sandbox/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/monday-money-opportunity-cost-liquidity-2026-10-12\/$/,
+    /\/blog\/posts\/weekly-it-trends-2026-10-13\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "월요일 경제 기초: 기회비용과 유동성으로 돈 묶는 기간 정하기",
+    "2026년 10월 둘째 주 IT 기술동향: Node 관측성, Lambda AZ locality, agent 정책 sandbox",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "비상금, 예금, 투자 대기금, 기회비용, 유동성이 기간 사다리로 연결된 무텍스트 개인 재무 다이어그램",
+    "Node.js 관측성, Lambda AZ locality, Cloudflare workflow batch, agent policy sandbox가 연결된 무텍스트 기술 동향 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /기회비용과 유동성으로 돈 묶는 기간/,
+      name: /Node 관측성, Lambda AZ locality, agent 정책 sandbox/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /isolate로 무거운 작업/,
+      name: /앱 생명주기와 재개 경계/,
     }),
   ).toBeVisible();
 });
@@ -111,14 +111,14 @@ test("카테고리와 태그로 공개 글을 탐색할 수 있다", async ({ pa
   await expect(page).toHaveURL(/\/blog\/categories\/Frontend\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Frontend 글");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스물셋째 걸음/ }),
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스물넷째 걸음/ }),
   ).toBeVisible();
 
   await page.getByRole("link", { name: "#Flutter", exact: true }).first().click();
   await expect(page).toHaveURL(/\/blog\/tags\/Flutter\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("#Flutter");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스물셋째 걸음/ }),
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스물넷째 걸음/ }),
   ).toBeVisible();
 });
 
@@ -150,7 +150,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("학습 글");
   await expect(
     page.getByRole("link", {
-      name: /기회비용과 유동성으로 돈 묶는 기간/,
+      name: /앱 생명주기와 재개 경계/,
     }),
   ).toBeVisible();
 
