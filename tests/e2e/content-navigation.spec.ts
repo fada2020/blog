@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /Node 관측성, Lambda AZ locality, agent 정책 sandbox/ })
+    .getByRole("link", { name: /sandbox와 telemetry 계약/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/weekly-it-trends-2026-10-13\/$/,
+    /\/blog\/posts\/ai-agent-sandbox-telemetry-fast-path-2026-10-14\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "2026년 10월 둘째 주 IT 기술동향: Node 관측성, Lambda AZ locality, agent 정책 sandbox",
+    "AI agent 운영: sandbox와 telemetry 계약 세우기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "Node.js 관측성, Lambda AZ locality, Cloudflare workflow batch, agent policy sandbox가 연결된 무텍스트 기술 동향 다이어그램",
+    "AI agent 모델 선택, 로컬 샌드박스, telemetry, 빠른 판정 API, 관리형 배포가 연결된 무텍스트 운영 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /Node 관측성, Lambda AZ locality, agent 정책 sandbox/,
+      name: /sandbox와 telemetry 계약/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /앱 생명주기와 재개 경계/,
+      name: /상태 복원으로 끊긴 작업/,
     }),
   ).toBeVisible();
 });
@@ -111,14 +111,14 @@ test("카테고리와 태그로 공개 글을 탐색할 수 있다", async ({ pa
   await expect(page).toHaveURL(/\/blog\/categories\/Frontend\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Frontend 글");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스물넷째 걸음/ }),
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스물다섯째 걸음/ }),
   ).toBeVisible();
 
   await page.getByRole("link", { name: "#Flutter", exact: true }).first().click();
   await expect(page).toHaveURL(/\/blog\/tags\/Flutter\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("#Flutter");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스물넷째 걸음/ }),
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스물다섯째 걸음/ }),
   ).toBeVisible();
 });
 
@@ -150,7 +150,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("학습 글");
   await expect(
     page.getByRole("link", {
-      name: /앱 생명주기와 재개 경계/,
+      name: /상태 복원으로 끊긴 작업/,
     }),
   ).toBeVisible();
 
@@ -158,7 +158,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page).toHaveURL(/\/blog\/kinds\/learning\/page\/2\/$/);
   await expect(
     page.getByRole("link", {
-      name: "Spring Boot 개발자를 위한 Kotlin 열넷째 걸음: contracts로 smart cast 경계 읽기",
+      name: "Spring Boot 개발자를 위한 Flutter 스무째 걸음: AnimationController 생명주기 다루기",
     }),
   ).toBeVisible();
 });

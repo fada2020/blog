@@ -1,0 +1,263 @@
+---
+title: "Spring Boot 개발자를 위한 Flutter 스물다섯째 걸음: 상태 복원으로 끊긴 작업 이어가기"
+description: "Spring Session과 임시 저장 감각에 빗대어 Flutter RestorationManager, RestorationMixin, RestorableProperty, restorable route의 경계를 정리합니다."
+publishedAt: 2026-10-14T00:03:00+09:00
+draft: false
+category: "Frontend"
+tags: ["Flutter", "Dart", "Spring Boot", "State Restoration", "Mobile"]
+kind: "learning"
+heroImage: "../../assets/blog/flutter-state-restoration-boundary-2026-10-14/cover.webp"
+heroImageAlt: "Flutter 상태 복원 버킷, 입력값, 탭, route stack, 장기 저장소 경계가 연결된 무텍스트 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 모바일 앱 학습"
+lesson: 25
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 10월 14일 KST 기준으로 Flutter SDK archive JSON, Flutter 공식 changelog, Android state restoration guide,
+> iOS state restoration guide, `RestorationMixin`, `RestorableProperty`, `RestorationManager`, `Navigator` API 문서를
+> 확인했습니다. SDK archive의 stable channel은 Flutter 3.47.7, Dart 3.13.5를 가리켰고, 이 글은 stable API를
+> 기준으로 합니다. beta, dev, main channel 기능은 안정 기능처럼 설명하지 않습니다.
+
+## 결론부터 말하면
+
+앱 생명주기 글에서는 foreground와 background 전환을 다뤘습니다. 이번에는 앱이 background에 있는 동안 운영체제에 의해 종료된 뒤
+다시 열렸을 때, 사용자가 하던 일을 어디까지 이어 줄지 정합니다.
+
+Flutter의 state restoration은 서버 DB나 local database를 대신하는 장치가 아닙니다. Android와 iOS가 앱을 다시 띄울 때
+**짧고 직렬화 가능한 화면 상태**를 되살리기 위한 경량 복원 계층입니다. Spring Boot 개발자에게 비유하면 영구 저장소보다는
+form draft, wizard step, selected tab, route stack을 되살리는 request/session continuity에 가깝습니다.
+
+## 이번 주 개념
+
+Flutter state restoration의 핵심 객체는 네 가지입니다.
+
+- `RestorationManager`: framework와 engine 사이에서 복원 데이터를 주고받는 관리자입니다.
+- `restorationScopeId`: `MaterialApp`, `CupertinoApp`, `WidgetsApp` 같은 app root에 붙이는 복원 범위 ID입니다.
+- `RestorationMixin`: `State` 객체가 복원 가능한 값을 등록하도록 돕는 mixin입니다.
+- `RestorableProperty`: 실제로 직렬화하고 복원할 값을 감싸는 객체입니다.
+
+<Mermaid title="Flutter 상태 복원 경계">
+{`flowchart LR
+  App["MaterialApp restorationScopeId"] --> Bucket["Restoration bucket"]
+  Bucket --> Widget["RestorationMixin"]
+  Widget --> Props["RestorableProperty"]
+  Props --> Input["입력값 / 선택 탭 / route argument"]
+  Widget --> Route["restorable route"]
+
+  Input --> Short["짧은 instance state"]
+  Input -.분리.-> Durable["DB / secure storage / remote API"]
+  Route --> Stack["화면 stack 복원"]
+`}
+</Mermaid>
+
+공식 Android guide는 사용자가 다른 앱으로 이동한 뒤 OS가 background app을 종료할 수 있다고 설명합니다. 앱이 다시 선택되면
+relaunch되지만, 복원 장치가 없으면 사용자는 긴 form이나 선택 상태를 잃습니다. Flutter는 `RestorationManager`를 통해 상태가
+변할 때 engine에 복원 데이터를 제공해 두고, OS가 앱을 다시 띄울 때 그 데이터를 사용합니다.
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+Spring Boot에서는 사용자의 진행 상태를 보통 세 층으로 나눕니다.
+
+| 상태 | 예시 | 저장 위치 |
+|---|---|---|
+| 요청 내부 상태 | validation 중인 DTO | stack, request attribute |
+| 짧은 사용자 상태 | login 후 redirect target, wizard step | session, signed cookie, cache |
+| 영구 업무 데이터 | 주문, 결제, 게시글 | database |
+
+Flutter state restoration은 두 번째 칸에 가깝습니다. 사용자가 아직 제출하지 않은 화면 상태를 살리되, 주문이나 결제처럼 업무적으로
+중요한 데이터는 영구 저장소나 서버 API에 맡깁니다.
+
+```java
+@PostMapping("/orders/draft")
+String saveDraft(@SessionAttribute DraftOrder draft) {
+    // session은 사용자의 작업 연속성을 돕지만, 결제 완료 기록의 원천은 아니다.
+    return "orders/review";
+}
+```
+
+Flutter에서도 마찬가지입니다. `RestorableTextEditingController`는 입력 중인 검색어나 메모를 되살릴 수 있지만, 서버에 제출된
+주문 상태의 원천이 되어서는 안 됩니다.
+
+## Flutter에서는 무엇이 다른가
+
+Flutter 앱은 process가 죽었다가 다시 살아나도 사용자는 "앱으로 돌아왔다"고 느낍니다. 서버 요청처럼 시작과 끝이 분명하지 않고,
+화면 tree, route stack, controller 값이 함께 복원되어야 합니다.
+
+가장 작은 시작점은 app root에 `restorationScopeId`를 주는 것입니다.
+
+```dart
+import 'package:flutter/material.dart';
+
+void main() {
+  runApp(const OrderApp());
+}
+
+class OrderApp extends StatelessWidget {
+  const OrderApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      restorationScopeId: 'order_app',
+      home: const OrderDraftPage(),
+    );
+  }
+}
+```
+
+그 다음 built-in restoration을 지원하는 widget에는 `restorationId`를 붙입니다.
+
+```dart
+class OrderDraftPage extends StatelessWidget {
+  const OrderDraftPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Padding(
+        padding: EdgeInsets.all(16),
+        child: TextField(
+          restorationId: 'order_note',
+          decoration: InputDecoration(labelText: '요청 사항'),
+        ),
+      ),
+    );
+  }
+}
+```
+
+이 정도만으로도 일부 입력과 scroll position은 framework가 복원할 수 있습니다. 다만 business rule이 들어간 상태는 직접
+`RestorationMixin`으로 다루는 편이 명확합니다.
+
+## `RestorationMixin`으로 값 등록하기
+
+`RestorationMixin`을 쓰면 `restoreState`에서 복원 가능한 property를 등록합니다. 공식 API 문서는 `restoreState`가
+`initState` 직후 최소 한 번 호출되고, 새 restoration data가 제공되면 다시 호출될 수 있다고 설명합니다.
+
+```dart
+class CheckoutState extends State<CheckoutPage> with RestorationMixin {
+  final RestorableInt _step = RestorableInt(0);
+  final RestorableBool _giftWrap = RestorableBool(false);
+  final RestorableTextEditingController _memo =
+      RestorableTextEditingController();
+
+  @override
+  String? get restorationId => 'checkout_page';
+
+  @override
+  void restoreState(RestorationBucket? oldBucket, bool initialRestore) {
+    registerForRestoration(_step, 'step');
+    registerForRestoration(_giftWrap, 'gift_wrap');
+    registerForRestoration(_memo, 'memo');
+  }
+
+  @override
+  void dispose() {
+    _step.dispose();
+    _giftWrap.dispose();
+    _memo.dispose();
+    super.dispose();
+  }
+
+  void moveNext() {
+    setState(() {
+      _step.value += 1;
+    });
+  }
+}
+```
+
+여기서 중요한 점은 plain field를 복원 대상으로 착각하지 않는 것입니다. 복원되어야 할 값은 `RestorableProperty` 계열에 담고,
+값이 바뀌면 해당 property가 framework에 알려 복원 bucket이 최신 상태를 갖게 합니다.
+
+## route stack도 복원 대상입니다
+
+사용자가 상세 화면에서 앱을 나갔다가 돌아왔는데 목록 첫 화면으로 밀리면 흐름이 끊깁니다. `Navigator` API 문서는 page-based route의
+`restorationId`나 `restorablePush`, `restorablePushNamed` 같은 restorable imperative API로 route 상태를 복원할 수 있다고
+설명합니다.
+
+간단한 route push는 다음처럼 분리합니다.
+
+```dart
+Route<void> orderRoute(BuildContext context, Object? arguments) {
+  final orderId = arguments as String;
+
+  return MaterialPageRoute<void>(
+    builder: (_) => OrderDetailPage(orderId: orderId),
+  );
+}
+
+void openOrder(BuildContext context, String orderId) {
+  Navigator.of(context).restorablePush(orderRoute, arguments: orderId);
+}
+```
+
+route argument는 복원 가능한 primitive 값으로 두는 편이 안전합니다. `Order` 객체 전체를 넘기는 대신 `orderId`를 넘기고,
+화면이 복원된 뒤 repository에서 최신 데이터를 다시 읽습니다.
+
+## 무엇을 복원하고 무엇을 저장할까
+
+공식 Android guide는 instance state가 unsubmitted form value, selected tab 같은 짧은 상태이며 Android에서는 1MB 제한을 넘으면
+native crash가 날 수 있다고 경고합니다. 이 제한은 설계 기준으로 삼아야 합니다.
+
+| 데이터 | state restoration | 별도 저장소 |
+|---|---|---|
+| 검색어, 선택 탭, wizard step | 적합 | 변경 없음 |
+| scroll 위치, focus에 가까운 화면 상태 | 적합 | 변경 없음 |
+| 주문/결제/업로드 결과 | 부적합 | 서버 API, local DB |
+| access token, refresh token | 부적합 | secure storage |
+| 큰 JSON 목록, 이미지, 첨부 파일 | 부적합 | cache DB, file storage |
+
+Spring 관점으로 말하면 session에 장바구니 ID를 넣을 수는 있어도 결제 ledger 전체를 넣지 않는 것과 같습니다.
+
+## 테스트는 kill-and-restore 시나리오로 봅니다
+
+상태 복원은 unit test만으로 감이 잘 오지 않습니다. 공식 문서는 Android developer option의 "Don't keep activities"와
+`RestorationManager` 페이지의 테스트 절차를 함께 안내합니다. widget test에서는 `WidgetTester`의 restoration 지원을 써서
+restart 후 값이 살아 있는지 확인할 수 있습니다.
+
+검증 checklist는 작게 시작합니다.
+
+1. `MaterialApp`에 `restorationScopeId`가 있는지 확인합니다.
+2. form field, scrollable, navigator에 적절한 `restorationId`가 있는지 확인합니다.
+3. 복원할 값이 primitive 또는 작은 restorable property인지 확인합니다.
+4. OS kill 후 앱 재진입 시 입력값, 탭, route가 살아 있는지 봅니다.
+5. 제출된 업무 데이터는 repository/server에서 다시 읽히는지 확인합니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫째, state restoration을 local database처럼 쓰는 오해입니다. 복원 bucket은 앱 continuity를 위한 짧은 상태입니다. 크고 중요한
+데이터는 durable storage로 보내야 합니다.
+
+둘째, `restoreState`를 한 번만 호출되는 초기화 함수로 보는 오해입니다. 공식 API는 새 restoration bucket이 제공되면 다시 호출될 수
+있다고 설명합니다. 복원 값에 의존하는 초기화는 `restoreState` 안에서 다시 실행될 수 있게 둡니다.
+
+셋째, route argument에 큰 object를 넣는 오해입니다. 복원 가능한 route는 ID나 작은 primitive argument를 넘기고, 실제 데이터는
+repository에서 다시 가져오는 쪽이 안전합니다.
+
+넷째, lifecycle callback에서 저장하면 충분하다는 오해입니다. OS kill 시점에는 모든 callback이 보장되지 않습니다. state restoration은
+값이 변할 때 framework가 데이터를 준비해 두게 만드는 방식입니다.
+
+## 연습 문제
+
+1. 검색 화면에 `restorationScopeId`와 `TextField.restorationId`를 붙이고, 앱을 background kill 후 다시 열어 검색어가 살아 있는지 확인해 보세요.
+2. checkout wizard의 현재 step을 `RestorableInt`로 바꾸고, 제출된 주문 데이터와 분리해 보세요.
+3. `Navigator.restorablePush`로 상세 화면을 열고, argument를 domain object가 아니라 ID로 바꿔 보세요.
+4. "복원할 값"과 "영구 저장할 값"을 현재 앱의 form 하나에 대해 표로 나눠 보세요.
+5. Android의 1MB 제한을 넘길 위험이 있는 값이 restoration bucket에 들어가지 않는지 점검해 보세요.
+
+## 참고자료
+
+- [Flutter SDK archive](https://docs.flutter.dev/install/archive)
+- [Flutter changelog](https://github.com/flutter/flutter/blob/master/CHANGELOG.md)
+- [Restore state on Android](https://docs.flutter.dev/platform-integration/android/restore-state-android)
+- [Restore state on iOS](https://docs.flutter.dev/platform-integration/ios/restore-state-ios)
+- [RestorationMixin API](https://api.flutter.dev/flutter/widgets/RestorationMixin-mixin.html)
+- [RestorableProperty API](https://api.flutter.dev/flutter/widgets/RestorableProperty-class.html)
+- [RestorationManager API](https://api.flutter.dev/flutter/services/RestorationManager-class.html)
+- [Navigator API](https://api.flutter.dev/flutter/widgets/Navigator-class.html)
