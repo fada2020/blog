@@ -1,0 +1,142 @@
+---
+title: "시간 데이터 회고: 원본 시각과 표시 시각을 분리해야 합니다"
+description: "시간대 중복 변환을 예방하기 위해 이벤트 원본, 저장 열 의미, API 계약, 화면 표시 규칙과 검증 증거를 분리하는 방법을 정리합니다."
+publishedAt: 2026-10-15T09:05:00+09:00
+draft: false
+category: "Observability"
+tags: ["Time", "Timezone", "API Contract", "Testing", "Observability"]
+kind: "worklog"
+heroImage: "../../assets/blog/time-semantics-contract-retrospective-2026-10-15/cover.webp"
+heroImageAlt: "원본 이벤트 시각, UTC 기준, 지역 표시 시각과 중복 변환 경고가 검증 경계로 연결된 무텍스트 운영 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 범위**
+>
+> 2026년 10월 15일에 업무일지의 화면 시간대 중복 변환 수정·테스트·환경 반영 기록을 바탕으로 작성했습니다.
+> 조직명, 서비스명, 내부 URL, 계정, 사용자·의료 정보와 운영 식별자는 공개 글에서 제거했습니다. 이 글은 시간
+> 의미를 보존하는 설계 회고이며 특정 시스템의 현재 운영 상태나 실제 사용자 데이터 처리를 증명하지 않습니다.
+
+## 결론부터 말하면
+
+시간 버그는 대개 formatter 한 줄의 문제가 아닙니다. 이벤트가 언제 발생했는지, DB 열이 무엇을 뜻하는지, API 문자열이
+offset을 갖는지, 화면이 어느 timezone으로 해석해야 하는지가 각각 다를 때 생깁니다. 한 계층이 이미 지역 시각으로
+정규화한 값을 다음 계층이 다시 UTC라고 가정하면, 사용자는 정확히 한 timezone offset만큼 밀린 시간을 봅니다.
+
+이번 회고의 핵심은 하나입니다. **값과 표시를 고치기 전에 시각의 의미부터 이름 붙여야 합니다.**
+
+- 원본 event instant와 화면에 내려 주는 display time은 다른 값일 수 있습니다.
+- `+09:00`은 "9시간을 더하라"는 명령이 아니라 이미 적용된 UTC+9 offset입니다.
+- 서버·DB·클라이언트의 timezone 설정만으로 열의 의미를 알 수 없습니다.
+- 재현 테스트는 같은 화면의 다른 시간 종류가 깨지지 않는지까지 보여야 합니다.
+
+## 먼저 네 층을 분리합니다
+
+시간 값을 추적할 때는 원본·저장·전송·표시 네 층을 한 표에 놓습니다.
+
+| 층 | 확인할 질문 | 예시 |
+| --- | --- | --- |
+| 원본 이벤트 | 실제로 발생한 instant는 무엇인가 | `2026-10-07T01:32:15Z` |
+| 저장 열 | 이 열은 instant, local datetime, 문자열 중 무엇인가 | `occurred_at timestamptz` |
+| API 계약 | offset이 있는 ISO-8601인가, timezone 없는 local string인가 | `2026-10-07T10:32:15+09:00` |
+| 화면 표시 | 어떤 timezone으로 어떤 종류를 보여 주는가 | 브라우저 locale 또는 서버 제공 display time |
+
+<Mermaid title="시간 의미를 잃지 않는 데이터 흐름">
+{`flowchart LR
+  Source["source event instant"] --> Store["storage column semantics"]
+  Store --> Api["API: ISO-8601 + explicit offset"]
+  Api --> Classify{"instant or display time?"}
+  Classify -->|instant| Convert["format once in viewer timezone"]
+  Classify -->|display time| Render["render without second conversion"]
+  Convert --> Render
+  Render --> Test["representative regression tests"]
+`}
+</Mermaid>
+
+이 표를 만들면 "DB session timezone이 서울이니 화면도 서울일 것" 같은 추측을 멈출 수 있습니다. 각 값이 어느 층에서
+어떤 의미인지 확인해야 수정 범위가 작아지고 API 계약도 우연히 바뀌지 않습니다.
+
+## 중복 변환은 어떻게 생기는가
+
+다음 두 문자열은 모양은 비슷하지만 의미가 다릅니다.
+
+```text
+2026-10-07T01:32:15Z       // UTC instant
+2026-10-07T10:32:15+09:00  // 같은 instant, UTC+9 offset이 이미 포함됨
+```
+
+두 번째 값을 `Date`로 parse해 Asia/Seoul로 format하는 것은 맞습니다. 하지만 API가 timezone 없는
+`2026-10-07T10:32:15`를 "이미 화면용 local time"으로 약속했다면, 클라이언트가 이를 UTC로 해석한 뒤 다시
+Asia/Seoul로 바꾸는 순간 `19:32:15`가 됩니다. 이때 수정해야 하는 것은 단지 `+9` 계산이 아니라 해당 필드의
+계약과 parser 선택입니다.
+
+```ts
+// instant 계약: timezone-aware parse 후 viewer timezone에서 한 번 format
+formatInTimeZone("2026-10-07T01:32:15Z", "Asia/Seoul"); // 10:32:15
+
+// display-time 계약: 이미 제공된 화면용 문자열이면 재변환하지 않음
+renderDisplayTime("2026-10-07T10:32:15"); // 10:32:15
+```
+
+둘 중 하나가 항상 더 낫다는 뜻은 아닙니다. 시간대가 다른 사용자를 지원하거나 정렬·기간 계산을 해야 한다면
+instant + explicit offset 계약이 안전합니다. legacy 연동으로 local display string을 유지해야 한다면 field name,
+문서, 테스트에 그 의미를 명확히 남겨야 합니다.
+
+## 변경 전후를 계약으로 비교합니다
+
+| 항목 | 수정 전의 잘못된 가정 | 수정 후의 명시적 규칙 |
+| --- | --- | --- |
+| 특정 화면 항목 | 모든 문자열이 UTC instant | 서버 제공 display time은 그대로 렌더링 |
+| 다른 활동 기록 | 개별 의미를 확인하지 않음 | UTC instant는 기존 local conversion 유지 |
+| API | 화면 formatter가 의미를 추정 | 필드의 시각 의미와 offset 여부를 문서화 |
+| 저장값 | 문제를 화면에서 보정 | DB 원본과 저장값은 바꾸지 않음 |
+| 검증 | 하나의 수정된 시각만 확인 | 대상 시각과 기존 UTC 시각을 함께 회귀 테스트 |
+
+업무일지 기반 사례에서도 수정은 화면 표시 규칙과 회귀 테스트에 한정했습니다. 요청·응답 field, HTTP status,
+DB schema와 기존 저장값은 변경하지 않았습니다. 이것이 중요한 이유는, 잘못된 화면 표시를 고치면서 과거 event의
+실제 instant까지 덮어쓰는 더 큰 데이터 사고를 막기 때문입니다.
+
+## 재현 가능한 검증은 두 부류가 필요합니다
+
+하나의 실패 사례만 테스트하면 "9시간을 덜 더했다"는 우연한 수정이 남을 수 있습니다. 최소한 다음 두 fixture를
+함께 둡니다.
+
+```ts
+it("이미 표시용으로 전달된 시간은 다시 변환하지 않는다", () => {
+  expect(renderAlert("2026-10-07T10:32:15")).toBe("10:32:15");
+});
+
+it("UTC instant는 기존 viewer timezone 변환을 유지한다", () => {
+  expect(renderActivity("2026-10-07T01:32:15Z", "Asia/Seoul")).toBe("10:32:15");
+});
+```
+
+그다음은 계층별 증거를 구분해 기록합니다.
+
+- 단위·컴포넌트 테스트: 같은 fixture를 항상 같은 표시값으로 만드는가
+- 빌드·정적 검사: type, lint, bundle 과정에서 계약이 깨지지 않는가
+- 배포 상태: 승인된 환경에 변경 artifact가 실제 반영됐는가
+- 읽기 전용 화면 확인: 인증 전 상태와 실제 데이터 표시를 혼동하지 않았는가
+- 실제 쓰기 흐름: 사용자 데이터 변경이 필요한 검증은 별도 승인과 격리 조건이 있는가
+
+배포 성공이나 HTTP 200만으로 실제 로그인 화면의 모든 시간 표시가 옳다고 말할 수 없습니다. 반대로 화면 테스트 하나가
+통과했다고 DB 저장 의미까지 증명하는 것도 아닙니다. 증거의 층을 나누면 남은 검증을 정직하게 남길 수 있습니다.
+
+## 다음 시간 버그를 줄이는 규칙
+
+1. API field 이름에 `At`, `Instant`, `Local`, `Display` 같은 의미를 반영합니다.
+2. 새 API에는 timezone-aware ISO-8601 문자열 또는 epoch instant 중 하나를 일관되게 사용합니다.
+3. timezone 없는 문자열을 써야 한다면 producer·consumer·문서에 기준 timezone을 같이 명시합니다.
+4. DB type, session timezone, serializer, browser formatter를 같은 문제로 뭉뚱그리지 않습니다.
+5. 수정 전 실패 fixture와 수정 후 기대값, 영향을 받지 않아야 할 fixture를 함께 보존합니다.
+6. 실제 사용자 데이터를 바꾸는 검증은 테스트·배포·읽기 전용 확인과 분리해 승인 범위를 명시합니다.
+
+## 참고자료
+
+- [PostgreSQL date/time types](https://www.postgresql.org/docs/current/datatype-datetime.html) - timestamp와 time zone 표현의 의미
+- [JavaScript Date time string format](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date#date_time_string_format) - ISO-8601 계열 문자열 해석 시 주의점
+- [Temporal proposal documentation](https://tc39.es/proposal-temporal/docs/) - instant, time zone, plain date-time을 구분하는 모델
+

@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /sandbox와 telemetry 계약/ })
+    .getByRole("link", { name: /원본 시각과 표시 시각/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/ai-agent-sandbox-telemetry-fast-path-2026-10-14\/$/,
+    /\/blog\/posts\/time-semantics-contract-retrospective-2026-10-15\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "AI agent 운영: sandbox와 telemetry 계약 세우기",
+    "시간 데이터 회고: 원본 시각과 표시 시각을 분리해야 합니다",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "AI agent 모델 선택, 로컬 샌드박스, telemetry, 빠른 판정 API, 관리형 배포가 연결된 무텍스트 운영 다이어그램",
+    "원본 이벤트 시각, UTC 기준, 지역 표시 시각과 중복 변환 경고가 검증 경계로 연결된 무텍스트 운영 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /sandbox와 telemetry 계약/,
+      name: /원본 시각과 표시 시각/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /상태 복원으로 끊긴 작업/,
+      name: /취소 뒤 정리 경계/,
     }),
   ).toBeVisible();
 });
@@ -150,7 +150,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("학습 글");
   await expect(
     page.getByRole("link", {
-      name: /상태 복원으로 끊긴 작업/,
+      name: /취소 뒤 정리 경계/,
     }),
   ).toBeVisible();
 
