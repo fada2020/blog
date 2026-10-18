@@ -1,0 +1,163 @@
+---
+title: "주간 기술 심화: Kotlin sealed 오류 모델을 공개 계약으로 다루기"
+description: "Kotlin 2.4.21의 sealed 계층을 Spring Boot 오류 응답, 직렬화, 버전 호환성까지 연결해 안전한 공개 계약으로 설계합니다."
+publishedAt: 2026-10-18T08:55:00+09:00
+draft: false
+category: "Backend"
+tags: ["Kotlin", "Spring Boot", "Error Handling", "API Design", "Serialization"]
+kind: "deep-dive"
+heroImage: "../../assets/blog/kotlin-sealed-contract-boundary-2026-10-18/cover.webp"
+heroImageAlt: "sealed 오류 계층이 웹 경계를 지나 API 응답 계약과 검증 목록으로 이어지는 무텍스트 기술 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "주간 기술 심화"
+lesson: 10
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 10월 18일 KST 기준 최신 안정 Kotlin은 `2.4.21`입니다. Kotlin 공식 문서의 sealed 클래스·인터페이스 제약과
+> `when` exhaustiveness를 확인했고, `2.4.20`의 Swift export는 안정/실험 상태를 구분해 읽었습니다.
+> 이 글은 이번 주의 [오류 경계 글](/blog/posts/kotlin-sealed-error-boundary-2026-10-16/)을 요약하지 않고,
+> 그 모델이 모듈·HTTP·직렬화 경계를 지날 때 무엇이 공개 계약이 되는지 파고듭니다.
+
+## 이번 주에 이 기술이 중요했던 이유
+
+`sealed interface PaymentFailure`를 도메인 안에 두면 `when`은 새 실패 종류를 빠뜨리지 않게 도와줍니다. 하지만 그 타입을
+그대로 REST 응답 JSON으로 내보내는 순간 문제의 성격이 달라집니다. 이제 하위 타입 이름, 필드, discriminator, HTTP 상태가
+클라이언트와의 **공개 약속**이 됩니다. 서버만 동시에 배포되는 모놀리식에서는 컴파일 오류가 안전망이지만, 모바일 앱·외부 파트너·이전 서버가
+공존하면 컴파일러는 상대편을 다시 빌드해 주지 않습니다.
+
+핵심은 다음 한 줄입니다.
+
+**sealed는 내부 분기를 닫아 주지만, 네트워크 계약의 변경 비용까지 없애 주지는 않습니다.**
+
+## 먼저 세 경계를 분리합니다
+
+<Mermaid chart={`flowchart LR
+  D[Domain sealed failure] --> M[Web mapping]
+  M --> P[Problem response DTO]
+  P --> C[Client contract]
+  O[Unknown throwable] --> L[Log and trace]
+  O --> G[Generic 500 problem]
+`} />
+
+| 경계 | 바뀌어도 되는 것 | 쉽게 바꾸면 안 되는 것 |
+|---|---|---|
+| 도메인 | 하위 타입 이름, 내부 원인, 재시도 판단 | 유스케이스가 알아야 할 실패 의미 |
+| web adapter | `ResponseEntity`, status 매핑 | 공개 `type`, `code`, JSON 필드 의미 |
+| 클라이언트 | 화면 문구, 로컬 재시도 UI | 이미 배포된 응답을 해석하는 규칙 |
+
+Java/Spring Boot에서 `enum ErrorCode`와 예외 클래스를 섞어 쓰던 팀이라면, sealed 계층은 `enum`보다 풍부하고 예외보다
+명시적인 중간층입니다. 다만 `enum`의 문자열 값을 바꾸면 클라이언트가 깨지듯, sealed 하위 타입을 직렬화 형식으로 노출하면 타입 이름도
+사실상 외부 enum 값이 됩니다.
+
+## 안전한 방향: 도메인 결과와 전송 DTO를 분리하기
+
+도메인은 HTTP를 모르고, web adapter만 Problem Details 모양을 결정하게 만듭니다. 아래에서 `Failure`에 새 하위 타입을 추가하면
+`toProblem`의 `when`이 컴파일 단계에서 멈춥니다. 그러나 JSON의 `code`는 의도적으로 안정적인 문자열로 유지합니다.
+
+```kotlin
+sealed interface PaymentFailure {
+    data object NotFound : PaymentFailure
+    data class BalanceTooLow(val available: Long) : PaymentFailure
+    data object ProviderUnavailable : PaymentFailure
+}
+
+data class ApiProblem(
+    val type: String,
+    val title: String,
+    val status: Int,
+    val code: String,
+)
+
+fun PaymentFailure.toProblem(): ApiProblem = when (this) {
+    PaymentFailure.NotFound -> ApiProblem(
+        type = "https://api.example.invalid/problems/payment-not-found",
+        title = "결제 대상을 찾을 수 없습니다.", status = 404, code = "PAYMENT_NOT_FOUND",
+    )
+    is PaymentFailure.BalanceTooLow -> ApiProblem(
+        type = "https://api.example.invalid/problems/insufficient-balance",
+        title = "잔액이 부족합니다.", status = 422, code = "INSUFFICIENT_BALANCE",
+    )
+    PaymentFailure.ProviderUnavailable -> ApiProblem(
+        type = "https://api.example.invalid/problems/provider-unavailable",
+        title = "결제 제공자를 잠시 사용할 수 없습니다.", status = 503, code = "PROVIDER_UNAVAILABLE",
+    )
+}
+```
+
+여기서 `available`은 서버 내부 판단에는 유용하지만 응답에는 넣지 않았습니다. 금액·계정 상태처럼 노출 범위가 다른 필드는
+도메인 타입에 있다는 이유만으로 전송 DTO에 따라가면 안 됩니다.
+
+## `when`의 exhaustiveness가 보장하는 범위
+
+Kotlin 공식 문서와 명세에 따르면 sealed 타입의 직접 하위 타입은 같은 package와 module에 있어야 하고, `when`은 알려진
+하위 타입을 모두 처리했는지 검사합니다. 이 특성은 아래 두 경우에 강합니다.
+
+1. 한 Gradle module 안에서 새 실패를 추가했는데 mapper를 고치지 않은 경우
+2. `else`를 쓰지 않아, 미래의 하위 타입을 조용히 일반 오류로 삼키지 않은 경우
+
+반대로 이미 컴파일되어 배포된 소비자에는 새 하위 타입이 자동으로 전달되지 않습니다. 라이브러리의 public sealed hierarchy를
+확장하면 이전 바이너리가 기대하지 않은 값이 들어올 수 있고, 네트워크 JSON의 새 discriminator도 오래된 앱이 모를 수 있습니다.
+따라서 외부 계약은 `code`·`type`을 문서화하고, 새 오류를 추가할 때 클라이언트의 기본 처리(알 수 없는 code → 일반 오류 화면)를
+명시적으로 시험하는 편이 낫습니다.
+
+## 직렬화에서는 타입 이름 대신 의도를 버전 관리합니다
+
+다음 선택지를 비교해 보세요.
+
+| 방식 | 장점 | 위험 | 권장 위치 |
+|---|---|---|---|
+| Kotlin class name 직렬화 | 처음 구현이 빠름 | rename·패키지 이동이 API 변경이 됨 | 피함 |
+| 안정 `code`와 `type` DTO | 리뷰와 문서화가 쉬움 | mapper를 작성해야 함 | 공개 HTTP API |
+| 내부 sealed + transport DTO | 도메인과 전송 관심사 분리 | 테스트가 두 층 필요 | Spring Boot 서비스 |
+
+Jackson 또는 `kotlinx.serialization`의 polymorphic 설정은 편리하지만, 설정이 성공했다는 사실과 호환 가능한 public protocol이라는
+사실은 다릅니다. `@JsonTypeInfo`의 discriminator를 바꾸거나 subclass simple name을 노출하는 변경은 API 버전 변경으로 취급합니다.
+특히 `data class`의 필드 추가도 일부 엄격한 클라이언트에는 실패 원인이 될 수 있으므로, 실제 consumer의 unknown-field 정책을
+계약 테스트로 확인해야 합니다.
+
+## Spring Boot에서 적용하는 최소 검증
+
+```kotlin
+@Test
+fun `unknown code is rendered as a generic recoverable problem`() {
+    val response = client.get().uri("/payments/missing").exchange()
+
+    response.expectStatus().isEqualTo(404)
+        .expectBody()
+        .jsonPath("$.code").isEqualTo("PAYMENT_NOT_FOUND")
+        .jsonPath("$.type").isEqualTo(
+            "https://api.example.invalid/problems/payment-not-found",
+        )
+}
+```
+
+테스트 이름은 HTTP 상태만 검증하지 않고 `code`와 `type`의 의미까지 붙잡습니다. 다음 배포에서 `NotFound`를
+`MissingPayment`로 이름만 바꾸더라도 JSON 계약은 바뀌지 않아야 한다는 뜻입니다. 예상 밖 `Throwable`은 sealed에 억지로 넣지 말고
+trace ID를 로그·관측성 도구에 남긴 뒤, 민감한 원인을 숨긴 일반 `500`으로 변환합니다.
+
+## Java 개발자가 자주 하는 오해
+
+- **“sealed니까 API도 자동으로 안전하다.”** 컴파일 안전성은 다시 컴파일되는 코드에만 작동합니다.
+- **“`else`가 있으니 미래 호환적이다.”** 서버 mapper의 `else`는 새 도메인 오류를 놓치는 통로가 될 수 있습니다. 내부 `when`에는
+  가능하면 `else`를 두지 않는 편이 안전합니다.
+- **“상태 코드만 같으면 호환된다.”** `404`라도 `code`, `type`, 재시도 가능 여부가 달라지면 클라이언트의 행동은 달라집니다.
+
+## 다음 배포 전 점검표
+
+- [ ] 도메인 sealed 타입은 web/JSON annotation을 알지 않는가?
+- [ ] 모든 public 오류에 안정적인 `code`, `type`, `status`가 있는가?
+- [ ] 새 하위 타입을 추가하면 mapper 테스트가 컴파일 또는 테스트 단계에서 실패하는가?
+- [ ] 알 수 없는 오류 code를 받는 오래된 클라이언트의 기본 동작이 있는가?
+- [ ] 오류 응답에 계정·거래·내부 예외 정보가 섞이지 않는가?
+
+## 참고 자료
+
+- [Kotlin 공식 문서 - Sealed classes and interfaces](https://kotlinlang.org/docs/sealed-classes.html)
+- [Kotlin 언어 명세 - sealed classes and interfaces](https://kotlinlang.org/spec/kotlin-spec.html#sealed-classes-and-interfaces)
+- [Kotlin 2.4.21 release](https://github.com/JetBrains/kotlin/releases/tag/v2.4.21)
+- [Kotlin 2.4.20의 sealed Swift export 설명](https://kotlinlang.org/docs/whatsnew2420.html)

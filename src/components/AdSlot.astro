@@ -52,12 +52,14 @@ const config = getAdConfig(import.meta.env, placement);
 <style>
   .ad-slot {
     width: min(100%, var(--reading-width));
+    max-width: 100%;
     min-height: 132px;
     margin: 48px auto 0;
     padding: 20px 0;
     border-top: 1px solid var(--color-border);
     border-bottom: 1px solid var(--color-border);
     text-align: center;
+    overflow-x: hidden;
   }
 
   .ad-label {
@@ -68,6 +70,7 @@ const config = getAdConfig(import.meta.env, placement);
   }
 
   .ad-slot :global(ins) {
+    width: 100% !important;
     max-width: 100%;
     margin-inline: auto;
   }

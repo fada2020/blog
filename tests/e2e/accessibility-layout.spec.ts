@@ -137,7 +137,7 @@ test("홈의 주요 링크와 테마 버튼에 키보드 초점이 표시된다"
   await expectKeyboardFocusOutline(page, page.getByRole("link", { name: "Field Notes" }));
   await expectKeyboardFocusOutline(
     page,
-    page.getByRole("link", { name: /원본 시각과 표시 시각/ }),
+    page.getByRole("link", { name: /고용·금리·수출을 실적 시즌 장부/ }),
   );
   await expectKeyboardFocusOutline(page, page.getByRole("button", { name: "테마 전환" }));
 });
@@ -198,6 +198,20 @@ test("긴 글 콘텐츠와 Mermaid가 모바일 본문을 넘지 않는다", asy
   );
 
   expect(overflowingElements).toEqual([]);
+});
+
+test("새 시장 글은 모바일에서 광고 슬롯을 포함해 가로로 넘치지 않는다", async ({ page }) => {
+  await page.setViewportSize(viewports[0]);
+  await gotoDomReady(
+    page,
+    "/blog/posts/sunday-market-earnings-yields-export-ledger-2026-10-18/",
+  );
+
+  const hasHorizontalOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  );
+
+  expect(hasHorizontalOverflow).toBe(false);
 });
 
 test("비교 표는 구분선과 헤더를 표시하고 모바일에서 가로 스크롤된다", async ({

@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /원본 시각과 표시 시각/ })
+    .getByRole("link", { name: /고용·금리·수출을 실적 시즌 장부/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/time-semantics-contract-retrospective-2026-10-15\/$/,
+    /\/blog\/posts\/sunday-market-earnings-yields-export-ledger-2026-10-18\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "시간 데이터 회고: 원본 시각과 표시 시각을 분리해야 합니다",
+    "일요일 주식 학습: 고용·금리·수출을 실적 시즌 장부로 나누기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "원본 이벤트 시각, UTC 기준, 지역 표시 시각과 중복 변환 경고가 검증 경계로 연결된 무텍스트 운영 다이어그램",
+    "고용, 금리 곡선, 반도체 수출 컨테이너, 주식 시장, 위험 방패가 연결된 무텍스트 시장 점검 다이어그램",
   );
 });
 
@@ -71,7 +71,7 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /원본 시각과 표시 시각/,
+      name: /고용·금리·수출을 실적 시즌 장부/,
     }),
   ).toBeVisible();
   await expect(
