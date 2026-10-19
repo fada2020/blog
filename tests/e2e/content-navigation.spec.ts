@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /고용·금리·수출을 실적 시즌 장부/ })
+    .getByRole("link", { name: /대출 상환과 투자는 기대수익률보다 확정 비용/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/sunday-market-earnings-yields-export-ledger-2026-10-18\/$/,
+    /\/blog\/posts\/monday-money-debt-repayment-investment-2026-10-19\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "일요일 주식 학습: 고용·금리·수출을 실적 시즌 장부로 나누기",
+    "월요일 경제 기초: 대출 상환과 투자는 기대수익률보다 확정 비용에서 비교하기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "고용, 금리 곡선, 반도체 수출 컨테이너, 주식 시장, 위험 방패가 연결된 무텍스트 시장 점검 다이어그램",
+    "비상 현금, 대출 상환, 저축 사다리, 물가와 장기 투자 기간이 균형 저울에 연결된 무텍스트 개인 재무 다이어그램",
   );
 });
 
@@ -71,7 +71,7 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /고용·금리·수출을 실적 시즌 장부/,
+      name: /대출 상환과 투자는 기대수익률보다 확정 비용/,
     }),
   ).toBeVisible();
   await expect(

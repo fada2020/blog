@@ -1,0 +1,216 @@
+---
+title: "Spring Boot 개발자를 위한 Flutter 스물여섯째 걸음: 화면 크기와 입력 방식의 경계 설계하기"
+description: "Spring MVC의 뷰 조합 감각에 빗대어 Flutter SafeArea, MediaQuery, LayoutBuilder와 capability/policy 분리를 통해 적응형 화면을 설계합니다."
+publishedAt: 2026-10-19T00:03:00+09:00
+draft: false
+category: "Frontend"
+tags: ["Flutter", "Dart", "Spring Boot", "Adaptive UI", "Accessibility"]
+kind: "learning"
+heroImage: "../../assets/blog/flutter-adaptive-layout-boundary-2026-10-19/cover.webp"
+heroImageAlt: "Flutter 화면, route stack, 복원 버킷, 안전한 저장 경계가 재시작 흐름으로 연결된 무텍스트 적응형 UI 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 모바일 앱 학습"
+lesson: 26
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 10월 19일 KST에 Flutter SDK archive와 Flutter 공식 adaptive/responsive design,
+> SafeArea·MediaQuery, input/accessibility, capability/policy 문서를 확인했습니다. 문서가 반영하는
+> stable SDK는 Flutter 3.47.2입니다. 이 글은 stable API만 사용하며, 다음 stable 후보인 3.50 또는
+> beta·main channel 기능을 안정 기능처럼 다루지 않습니다.
+
+## 결론부터 말하면
+
+Flutter에서 적응형 UI는 `if (width > 600)` 한 줄을 추가하는 일이 아닙니다. **같은 업무를 어떤 공간과
+어떤 입력 장치에서 가장 안전하게 끝낼지**를 정하고, 그 결정을 화면 코드와 비즈니스 규칙에서 분리하는 일입니다.
+
+Spring Boot 개발자에게 비유하면 controller가 요청을 받는다는 사실만으로 모바일·데스크톱 화면을 결정하지 않는 것과 같습니다.
+서버는 같은 주문 목록을 주되, 뷰 계층은 창의 실제 제약과 사용자의 keyboard·mouse·touch 환경에 맞춰 navigation과
+정보 밀도를 결정합니다. Flutter도 먼저 공유할 데이터와 동작을 추출한 뒤, 부모가 준 제약을 측정하고, 마지막에 layout을
+고릅니다.
+
+## 이번 주 개념
+
+Flutter 공식 가이드는 적응형 화면을 세 단계로 설명합니다.
+
+1. **추상화**: bottom navigation과 navigation rail이 공유할 destination, 권한, 선택 상태를 먼저 분리합니다.
+2. **측정**: `MediaQuery`로 window·접근성 정보를 읽고, `LayoutBuilder`로 현재 widget이 실제로 쓸 수 있는 크기를 봅니다.
+3. **분기**: 넓이만이 아니라 입력 방식과 업무 흐름을 근거로 navigation과 화면 배치를 고릅니다.
+
+`SafeArea`는 notch, status bar, rounded corner, system UI에 가려질 수 있는 content에 padding을 더합니다.
+`MediaQuery`는 window size뿐 아니라 text scale, high contrast, accessibility service 같은 환경 정보를 제공합니다.
+`LayoutBuilder`는 큰 desktop window 안의 좁은 side panel처럼 **부모 제약이 화면 전체와 다른 곳**에서 특히 중요합니다.
+
+<Mermaid title="Flutter 적응형 UI의 결정 경계">
+{`flowchart LR
+  Domain["공유 업무 모델\nDestination / 권한 / 선택 상태"] --> Policy["UI 정책\n어떤 정보구조를 쓸지"]
+  Window["MediaQuery\nwindow·text scale·접근성"] --> Measure["측정"]
+  Parent["LayoutBuilder\n부모 constraints"] --> Measure
+  Measure --> Policy
+  Policy --> Compact["좁은 공간\nNavigationBar + 한 열"]
+  Policy --> Expanded["넓은 공간\nNavigationRail + 두 패널"]
+  Safe["SafeArea\n시스템 침범 영역"] --> Compact
+  Safe --> Expanded
+`}
+</Mermaid>
+
+## Java/Spring에서는 어떻게 다뤘는가
+
+서버 애플리케이션에서는 API가 업무 데이터를 표현하고, template·SPA·native client가 각자의 viewport에 맞게 이를 조합합니다.
+같은 `OrderSummary`를 반환하더라도 관리자 화면은 표와 filter를, 모바일 고객 화면은 카드와 bottom navigation을 선택할 수 있습니다.
+
+```java
+record Destination(String id, String label, boolean allowed) {}
+
+List<Destination> navigationFor(User user) {
+    return List.of(
+        new Destination("orders", "주문", user.hasOrderAccess()),
+        new Destination("profile", "내 정보", true)
+    );
+}
+```
+
+이 코드가 desktop인지 mobile인지는 알 필요가 없습니다. Flutter에서도 destination 목록과 authorization은 domain state에 두고,
+`NavigationRail`인지 `NavigationBar`인지는 UI policy에서 정하는 편이 테스트와 변경에 강합니다.
+
+## `SafeArea`는 전체 화면에 무조건 씌우는 장식이 아닙니다
+
+공식 문서는 보통 `Scaffold` body를 `SafeArea`로 감싸는 것부터 시작하라고 안내합니다. 그러나 지도, 카메라 preview, 배경
+이미지처럼 시스템 영역 아래까지 의도적으로 그려야 하는 UI는 body 전체가 아니라 실제 control만 감싸야 합니다.
+
+```dart
+class CheckoutPage extends StatelessWidget {
+  const CheckoutPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        minimum: const EdgeInsets.symmetric(horizontal: 16),
+        child: ListView(
+          children: const [
+            Text('주문 확인'),
+            SizedBox(height: 16),
+            CheckoutForm(),
+          ],
+        ),
+      ),
+    );
+  }
+}
+```
+
+여기서 중요한 것은 notch를 피해 보이게 하는 것만이 아닙니다. `SafeArea`가 적용된 범위와 edge-to-edge로 남겨 둔 범위를
+의도적으로 구분해야 gesture, overlay, scroll position을 예측할 수 있습니다.
+
+## `MediaQuery`와 `LayoutBuilder`를 역할에 맞게 쓰기
+
+과거에는 `MediaQuery.of(context).size`를 device screen이라고 부르곤 했습니다. 하지만 큰 monitor에서 창이 작게 떠 있거나,
+split-screen과 foldable hinge가 있는 환경에서는 오해를 부릅니다. Flutter 가이드는 widget의 배치 결정을 할 때 실제 부모 제약을
+`LayoutBuilder`로 측정하라고 권합니다.
+
+```dart
+class OrdersShell extends StatelessWidget {
+  const OrdersShell({super.key, required this.destinations});
+
+  final List<NavigationDestination> destinations;
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final isLargeText = media.textScaler.scale(16) > 20;
+
+    return SafeArea(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final useRail = constraints.maxWidth >= 720 && !isLargeText;
+          return useRail
+              ? Row(
+                  children: [
+                    NavigationRail(
+                      selectedIndex: 0,
+                      destinations: destinations
+                          .map((item) => NavigationRailDestination(
+                                icon: item.icon,
+                                label: Text(item.label),
+                              ))
+                          .toList(),
+                    ),
+                    const VerticalDivider(width: 1),
+                    const Expanded(child: OrdersPane()),
+                  ],
+                )
+              : const Scaffold(
+                  body: OrdersPane(),
+                  bottomNavigationBar: OrdersNavigationBar(),
+                );
+        },
+      ),
+    );
+  }
+}
+```
+
+예시의 `720`은 Flutter가 보장하는 magic number가 아닙니다. 목록과 detail을 나란히 놓았을 때 제목, button, text scaling이
+잘리지 않는지 확인해 팀이 정한 **layout policy**입니다. 화면 폭만 넓어도 큰 글자 설정에서는 rail을 강제하지 않는 이유도 여기에 있습니다.
+
+## capability와 policy를 나누면 platform 분기가 줄어듭니다
+
+`Platform.isAndroid`, `Platform.isIOS`, `kIsWeb`은 실행 위치를 알려 주지만, 제품이 커질수록 "어디서 실행되는가"가
+"무엇을 할 수 있고 무엇을 해야 하는가"를 대체하지 못합니다. 공식 가이드는 capability와 policy 클래스로 이를 분리하는 패턴을
+제안합니다.
+
+| 구분 | 질문 | 예시 |
+|---|---|---|
+| Capability | 지금 가능한가? | pointer hover, physical keyboard, split view, camera permission |
+| Policy | 제품이 무엇을 할 것인가? | desktop에서는 detail panel 유지, touch 우선이면 큰 hit target |
+| Layout | 현재 공간은 충분한가? | 이 pane의 `maxWidth`가 two-column 기준을 넘는가 |
+
+이 구분은 `if (Platform.is...)`가 비즈니스 widget 곳곳에 흩어지는 일을 막습니다. Android tablet, iPad, web, desktop에서
+같은 capability를 공유하는 경우에도 policy를 재사용할 수 있습니다.
+
+## 흔한 실패 사례
+
+- **orientation만으로 분기하기**: landscape phone은 넓어 보여도 keyboard나 split view가 들어오면 usable width가 작습니다.
+- **device type을 억지로 추정하기**: 화면 diagonal이나 OS 이름보다 현재 window constraints와 input capability가 직접적인 근거입니다.
+- **큰 화면에서 모든 폭을 쓰기**: 긴 본문과 form은 지나치게 넓으면 읽기 어렵습니다. content max width와 side pane을 따로 둡니다.
+- **touch만 가정하기**: custom control에는 hover, focus, tab traversal, shortcut과 충분한 target size를 검토합니다.
+- **text scale을 무시하기**: width breakpoint를 넘더라도 큰 글자에서는 한 열이 더 사용하기 쉬울 수 있습니다.
+
+## 독립 실행 실습
+
+아래 순서로 주문 목록 화면 하나만 측정해 보세요.
+
+1. `Destination`과 selected index를 widget 밖의 단순 model로 분리합니다.
+2. `LayoutBuilder`에서 480, 720, 1024 logical pixel width를 log로 남깁니다.
+3. 390px phone, tablet, desktop window에서 `NavigationBar`와 rail 전환을 캡처합니다.
+4. Android/iOS accessibility text scale을 크게 하고, 모든 button label과 tab focus가 보이는지 확인합니다.
+5. notch와 gesture navigation 환경에서 bottom action이 가려지지 않는지 확인합니다.
+
+검증은 emulator screenshot만으로 끝내지 말고 pointer hover, keyboard-only navigation, screen reader label까지 나눠 기록하는 편이 좋습니다.
+
+## Java 개발자가 자주 하는 오해
+
+"backend가 responsive API를 만들면 client는 알아서 맞춘다"는 생각은 반만 맞습니다. API는 content와 권한을 안정적으로
+제공해야 하지만, 어떤 navigation과 information density가 usable한지는 client가 가진 실제 제약의 문제입니다. 반대로 UI가
+platform을 안다고 해서 authorization을 widget에서 판단해서도 안 됩니다. 서버의 authorization과 Flutter의 layout policy는
+각자 다른 책임을 가집니다.
+
+## 연습 문제
+
+1. 한 화면에 `MediaQuery.sizeOf(context)`만 쓰고 있는 곳을 찾아, parent constraint가 더 정확한 경우를 설명해 보세요.
+2. 2-column detail 화면에서 text scale 200%일 때 어떤 policy가 안전한지 정해 보세요.
+3. web과 desktop이 모두 pointer hover를 지원할 때, OS 이름 대신 capability로 표현하면 어떤 테스트가 쉬워지는지 적어 보세요.
+
+## 참고자료
+
+- [Flutter - SDK archive](https://docs.flutter.dev/install/archive)
+- [Flutter - Adaptive and responsive design](https://docs.flutter.dev/ui/adaptive-responsive)
+- [Flutter - General approach to adaptive apps](https://docs.flutter.dev/ui/adaptive-responsive/general)
+- [Flutter - SafeArea & MediaQuery](https://docs.flutter.dev/ui/adaptive-responsive/safearea-mediaquery)
+- [Flutter - User input & accessibility](https://docs.flutter.dev/ui/adaptive-responsive/input)
+- [Flutter - Capabilities & policies](https://docs.flutter.dev/ui/adaptive-responsive/capabilities)
