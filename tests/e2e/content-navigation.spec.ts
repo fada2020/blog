@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /대출 상환과 투자는 기대수익률보다 확정 비용/ })
+    .getByRole("link", { name: /비밀 탐지, 대화형 리팩터링, 모바일 심사 계약/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/monday-money-debt-repayment-investment-2026-10-19\/$/,
+    /\/blog\/posts\/weekly-it-trends-2026-10-20\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "월요일 경제 기초: 대출 상환과 투자는 기대수익률보다 확정 비용에서 비교하기",
+    "2026년 10월 셋째 주 IT 기술동향: 비밀 탐지, 대화형 리팩터링, 모바일 심사 계약",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "비상 현금, 대출 상환, 저축 사다리, 물가와 장기 투자 기간이 균형 저울에 연결된 무텍스트 개인 재무 다이어그램",
+    "저장소 보안 방패, 리팩터링 경로, 모바일 심사 관문이 하나의 배포 흐름으로 연결된 무텍스트 기술 동향 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /대출 상환과 투자는 기대수익률보다 확정 비용/,
+      name: /비밀 탐지, 대화형 리팩터링, 모바일 심사 계약/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /취소 뒤 정리 경계/,
+      name: /semantics와 focus traversal로 키보드 경로 설계하기/,
     }),
   ).toBeVisible();
 });
@@ -111,14 +111,14 @@ test("카테고리와 태그로 공개 글을 탐색할 수 있다", async ({ pa
   await expect(page).toHaveURL(/\/blog\/categories\/Frontend\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Frontend 글");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스물다섯째 걸음/ }),
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스물일곱째 걸음/ }),
   ).toBeVisible();
 
   await page.getByRole("link", { name: "#Flutter", exact: true }).first().click();
   await expect(page).toHaveURL(/\/blog\/tags\/Flutter\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("#Flutter");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스물다섯째 걸음/ }),
+    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스물일곱째 걸음/ }),
   ).toBeVisible();
 });
 
@@ -150,7 +150,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("학습 글");
   await expect(
     page.getByRole("link", {
-      name: /취소 뒤 정리 경계/,
+      name: /semantics와 focus traversal로 키보드 경로 설계하기/,
     }),
   ).toBeVisible();
 
