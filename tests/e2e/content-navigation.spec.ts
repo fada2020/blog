@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /비밀 탐지, 대화형 리팩터링, 모바일 심사 계약/ })
+    .getByRole("link", { name: /긴 문맥·빠른 작업·권한을 분리하는 세 경계/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/weekly-it-trends-2026-10-20\/$/,
+    /\/blog\/posts\/ai-agent-context-cost-permission-boundary-2026-10-21\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "2026년 10월 셋째 주 IT 기술동향: 비밀 탐지, 대화형 리팩터링, 모바일 심사 계약",
+    "AI agent 운영: 긴 문맥·빠른 작업·권한을 분리하는 세 경계",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "저장소 보안 방패, 리팩터링 경로, 모바일 심사 관문이 하나의 배포 흐름으로 연결된 무텍스트 기술 동향 다이어그램",
+    "중앙 agent가 장기 문맥 cache, 빠른 하위 작업, 격리 sandbox로 작업을 나누고 승인 방패와 비용 계량기로 연결되는 무텍스트 운영 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /비밀 탐지, 대화형 리팩터링, 모바일 심사 계약/,
+      name: /긴 문맥·빠른 작업·권한을 분리하는 세 경계/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /semantics와 focus traversal로 키보드 경로 설계하기/,
+      name: /l10n으로 언어와 형식의 경계 세우기/,
     }),
   ).toBeVisible();
 });
@@ -150,7 +150,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("학습 글");
   await expect(
     page.getByRole("link", {
-      name: /semantics와 focus traversal로 키보드 경로 설계하기/,
+      name: /l10n으로 언어와 형식의 경계 세우기/,
     }),
   ).toBeVisible();
 
