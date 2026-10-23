@@ -1,0 +1,161 @@
+---
+title: "Spring Boot 개발자를 위한 Kotlin 스물다섯째 걸음: delegated property의 수명 경계 지키기"
+description: "Kotlin 2.4.21의 lazy·observable 위임 프로퍼티를 Spring Boot singleton, 요청 상태, 동시성 경계에서 안전하게 사용하는 기준을 정리합니다."
+publishedAt: 2026-10-23T08:50:00+09:00
+draft: false
+category: "Backend"
+tags: ["Kotlin", "Delegated properties", "Spring Boot", "Concurrency", "Caching"]
+kind: "learning"
+heroImage: "../../assets/blog/kotlin-delegated-property-lifecycle-boundary-2026-10-23/cover.webp"
+heroImageAlt: "Kotlin 백엔드 서비스가 공용 불변 설정은 하나의 캐시에 보관하고 요청별 값은 흘려보내는 무텍스트 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 Kotlin 학습"
+lesson: 25
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 10월 23일 Kotlin 공식 release process와 delegated properties 문서를 확인했습니다.
+> 기준 안정 버전은 `Kotlin 2.4.21`입니다. `lazy`, `Delegates.observable`, 커스텀 delegate는
+> 안정 문법이지만, Spring bean의 수명이나 thread-safety를 대신 결정해 주지는 않습니다.
+
+## 결론부터 말하면
+
+`by lazy`는 **한 객체 인스턴스 안에서, 처음 읽을 때 한 번 계산할 값**에 적합합니다. Spring singleton에
+넣으면 캐시도 애플리케이션 전체 수명이 되고, request-scoped 값에 넣으면 요청 수명이 됩니다. 따라서 먼저
+"이 값은 누구와 얼마나 오래 공유되는가"를 정하고 delegate를 고르는 편이 안전합니다.
+
+- 공용·불변·계산 비용이 있는 설정 파생값은 singleton의 `val ... by lazy` 후보입니다.
+- 요청 ID, 인증 주체, locale처럼 매 요청 달라지는 값은 bean field나 `lazy` 캐시에 두지 않습니다.
+- `observable`은 상태 변경을 알려 줄 뿐, 이벤트 저장·트랜잭션·재시도·감사 로그를 보장하지 않습니다.
+- 기본 `lazy`는 동기화되지만, 외부 I/O·DB 조회를 숨기는 cache 장치로 쓰면 장애 원인이 흐려집니다.
+
+<Mermaid title="delegate를 고르기 전 수명과 공유 범위를 확인하는 흐름">
+{`flowchart TD
+  Value["값 후보"] --> Scope{"누가 공유하는가?"}
+  Scope -->|"애플리케이션 전체"| Immutable{"불변이고 계산이 비싼가?"}
+  Immutable -->|"예"| Lazy["singleton val by lazy"]
+  Immutable -->|"아니오"| Plain["일반 생성자 주입 또는 명시적 cache"]
+  Scope -->|"요청 하나"| Request["controller/service 인자로 전달"]
+  Scope -->|"사용자 세션·분산 환경"| External["명시적 저장소·만료·관측성 설계"]
+  Lazy --> Verify["동시성·실패·초기화 시점 테스트"]
+  Request --> Verify
+  External --> Verify
+`}
+</Mermaid>
+
+## `lazy`는 cache 정책이 아니라 초기화 방식입니다
+
+Kotlin 문서에 따르면 기본 `lazy`는 첫 접근 시 lambda를 한 번 실행하고 값을 기억하며, 기본 모드는
+동기화되어 여러 thread가 같은 초기화 결과를 봅니다. 이것은 작은 순수 계산에는 편리하지만, TTL·용량·무효화·
+실패 재시도 같은 cache 정책을 제공한다는 뜻은 아닙니다.
+
+```kotlin
+@Component
+class CountryRules(
+    private val properties: RulesProperties,
+) {
+    // 설정으로부터 만드는 불변 lookup table: singleton 수명과 맞습니다.
+    val supportedCodes: Set<String> by lazy {
+        properties.codes.map { it.trim().uppercase() }.toSet()
+    }
+}
+```
+
+이 예제는 외부 호출 없이 이미 주입된 설정에서 값을 정규화합니다. 시작 시 실패해야 하는 설정 오류라면
+`@PostConstruct`나 생성자 검증으로 앞당기는 편이 낫습니다. 반대로 DB나 원격 API를 여기서 호출하면 첫 사용자
+요청이 초기화 비용과 실패를 떠안고, 장애가 "가끔 첫 요청만 느린" 문제처럼 보일 수 있습니다.
+
+| 값의 성격 | 적절한 선택 | 피할 선택 |
+| --- | --- | --- |
+| 불변 설정의 파생값 | singleton `lazy` 또는 시작 시 검증 | 매 요청 재계산 |
+| 요청 ID·인증 주체 | 함수 인자 또는 Spring request context | singleton field·`lazy` |
+| 원격 응답 cache | 만료·용량·관측성을 가진 명시적 cache | `lazy` 한 줄 |
+| 변경 이력·업무 이벤트 | 트랜잭션 경계의 저장·발행 | `observable` callback |
+
+## 요청 상태를 singleton에 붙이지 않기
+
+다음 코드는 작동하는 것처럼 보여도 concurrent request가 같은 bean을 공유할 때 서로의 값을 덮을 수 있습니다.
+`lazy`로 바꿔도 첫 요청의 값이 고정될 뿐, 문제가 해결되지 않습니다.
+
+```kotlin
+@Service
+class InvoiceService {
+    // 잘못된 예: singleton bean에 요청별 값을 보관합니다.
+    private var currentRequestId: String? = null
+
+    fun issue(command: IssueInvoiceCommand, requestId: String): Invoice {
+        currentRequestId = requestId
+        return createInvoice(command)
+    }
+}
+```
+
+대신 경계에서 받은 값을 명시적으로 전달합니다. Java/Spring 개발자에게 익숙한 DI 원칙과 같습니다. bean은
+공유 가능한 협력자를 주입받고, 매 호출에 달라지는 사실은 함수 인자나 명시적인 context 객체에 둡니다.
+
+```kotlin
+data class RequestContext(val requestId: String)
+
+@Service
+class InvoiceService {
+    fun issue(command: IssueInvoiceCommand, context: RequestContext): Invoice {
+        auditIssued(command.customerId, context.requestId)
+        return createInvoice(command)
+    }
+}
+```
+
+MDC나 coroutine context를 이미 쓴다면 그 전파 계약도 별도로 테스트합니다. delegate가 trace·취소·thread-local
+전파를 자동으로 해 주지는 않습니다.
+
+## `observable`을 업무 이벤트 버스로 오해하지 않기
+
+`Delegates.observable`은 대입 뒤 callback을 호출합니다. UI 모델이나 테스트용 상태 관찰에는 유용하지만,
+callback 안에서 메시지를 보내거나 DB를 쓰면 실패·중복·순서가 domain 계약 밖으로 새어 나옵니다.
+
+```kotlin
+class RetryPolicy(initial: Int) {
+    var maxAttempts: Int by Delegates.vetoable(initial) { _, _, next ->
+        next in 1..5
+    }
+}
+```
+
+여기서는 값의 범위를 지역적으로 막는 용도입니다. 실제 정책 변경을 저장하고 다른 서비스에 알릴 때는 service
+method 안에서 검증, 영속화, outbox 또는 기존 이벤트 계약을 차례로 수행해야 합니다. callback만으로는 요청
+재시도 시의 중복 처리나 트랜잭션 원자성을 만들 수 없습니다.
+
+## `LazyThreadSafetyMode`는 측정 뒤에 고릅니다
+
+기본 모드가 과하다고 느껴져도 바로 `NONE`을 쓰지 않습니다. `PUBLICATION`은 여러 thread가 초기화 lambda를
+동시에 실행할 수 있고 그중 하나의 값이 저장될 수 있습니다. `NONE`은 thread-safety 보장이 없습니다.
+둘 다 람다가 순수하고 중복 실행되어도 안전한지, bean이 어느 thread에서 읽히는지 확인한 뒤에만 고려합니다.
+
+```kotlin
+private val compiledPattern by lazy(LazyThreadSafetyMode.PUBLICATION) {
+    Regex("[A-Z]{2}-\\d{6}")
+}
+```
+
+이처럼 중복 생성돼도 부작용이 없는 작은 객체에는 검토 여지가 있습니다. 하지만 connection 생성, token 발급,
+메시지 발행처럼 부작용이 있는 초기화에는 맞지 않습니다. 성능 문제는 profiler와 부하 측정으로 확인한 다음,
+명시적인 pool 또는 cache를 선택합니다.
+
+## 최소 연습과 점검표
+
+1. singleton bean에서 `lazy` 후보 하나를 골라 값의 입력이 불변인지 적습니다.
+2. 두 thread가 동시에 처음 읽는 테스트를 만들고, 초기화 횟수와 결과를 확인합니다.
+3. request ID·사용자 ID가 field에 보관되지 않는지 검색합니다.
+4. `observable` callback에 I/O나 메시지 발행이 있다면 service 경계로 옮길지 검토합니다.
+5. 기존 API의 필드, 상태 코드, 시간 형식은 바꾸지 않은 채 regression test를 실행합니다.
+
+## 참고자료
+
+- [Kotlin release process](https://kotlinlang.org/docs/releases.html) - 2026년 10월 23일 확인, 안정 버전 `2.4.21`
+- [Delegated properties](https://kotlinlang.org/docs/delegated-properties.html) - `lazy`, `observable`, `vetoable`과 기본 동기화 의미
+- [Kotlin properties](https://kotlinlang.org/docs/properties.html) - property와 delegate의 책임 범위
+- [Kotlin delegation](https://kotlinlang.org/docs/delegation.html) - property delegate와 interface delegation의 구분

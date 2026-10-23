@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /긴 문맥·빠른 작업·권한을 분리하는 세 경계/ })
+    .getByRole("link", { name: /쌀쌀한 가을 주말은 짧은 야외와 가까운 실내로/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/ai-agent-context-cost-permission-boundary-2026-10-21\/$/,
+    /\/blog\/posts\/toddler-cool-autumn-weekend-plan-2026-10-23\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "AI agent 운영: 긴 문맥·빠른 작업·권한을 분리하는 세 경계",
+    "25개월 아이 케어: 쌀쌀한 가을 주말은 짧은 야외와 가까운 실내로",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "중앙 agent가 장기 문맥 cache, 빠른 하위 작업, 격리 sandbox로 작업을 나누고 승인 방패와 비용 계량기로 연결되는 무텍스트 운영 다이어그램",
+    "보호자와 아이가 가을 공원의 짧은 산책과 가까운 실내 놀이를 건강 상태에 따라 고르는 무텍스트 주말 플랜 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /긴 문맥·빠른 작업·권한을 분리하는 세 경계/,
+      name: /쌀쌀한 가을 주말은 짧은 야외와 가까운 실내로/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /l10n으로 언어와 형식의 경계 세우기/,
+      name: /delegated property의 수명 경계 지키기/,
     }),
   ).toBeVisible();
 });

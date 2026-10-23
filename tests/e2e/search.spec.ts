@@ -9,15 +9,15 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(137);
+  expect(entries).toHaveLength(139);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "AI agent 운영: 긴 문맥·빠른 작업·권한을 분리하는 세 경계",
+    "25개월 아이 케어: 쌀쌀한 가을 주말은 짧은 야외와 가까운 실내로",
   );
   expect(entries[0].href).toBe(
-    "/blog/posts/ai-agent-context-cost-permission-boundary-2026-10-21/",
+    "/blog/posts/toddler-cool-autumn-weekend-plan-2026-10-23/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });
