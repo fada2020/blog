@@ -137,7 +137,7 @@ test("홈의 주요 링크와 테마 버튼에 키보드 초점이 표시된다"
   await expectKeyboardFocusOutline(page, page.getByRole("link", { name: "Field Notes" }));
   await expectKeyboardFocusOutline(
     page,
-    page.getByRole("link", { name: /쌀쌀한 가을 주말은 짧은 야외와 가까운 실내로/ }),
+    page.getByRole("link", { name: /수출 호조와 높은 장기금리를 같은 장부에 놓지 않기/ }),
   );
   await expectKeyboardFocusOutline(page, page.getByRole("button", { name: "테마 전환" }));
 });
@@ -204,7 +204,7 @@ test("새 시장 글은 모바일에서 광고 슬롯을 포함해 가로로 넘
   await page.setViewportSize(viewports[0]);
   await gotoDomReady(
     page,
-    "/blog/posts/sunday-market-earnings-yields-export-ledger-2026-10-18/",
+    "/blog/posts/saturday-market-exports-long-yields-risk-ledger-2026-10-24/",
   );
 
   const hasHorizontalOverflow = await page.evaluate(

@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /쌀쌀한 가을 주말은 짧은 야외와 가까운 실내로/ })
+    .getByRole("link", { name: /수출 호조와 높은 장기금리를 같은 장부에 놓지 않기/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/toddler-cool-autumn-weekend-plan-2026-10-23\/$/,
+    /\/blog\/posts\/saturday-market-exports-long-yields-risk-ledger-2026-10-24\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "25개월 아이 케어: 쌀쌀한 가을 주말은 짧은 야외와 가까운 실내로",
+    "토요일 주식 학습: 수출 호조와 높은 장기금리를 같은 장부에 놓지 않기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "보호자와 아이가 가을 공원의 짧은 산책과 가까운 실내 놀이를 건강 상태에 따라 고르는 무텍스트 주말 플랜 다이어그램",
+    "세계 지도, 컨테이너선, 반도체 칩, 교차하는 금리 곡선과 위험 방패를 배치한 무텍스트 시장 점검 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /쌀쌀한 가을 주말은 짧은 야외와 가까운 실내로/,
+      name: /수출 호조와 높은 장기금리를 같은 장부에 놓지 않기/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /delegated property의 수명 경계 지키기/,
+      name: /backing field로 상태 변경 경계 세우기/,
     }),
   ).toBeVisible();
 });

@@ -1,0 +1,153 @@
+---
+title: "Spring Boot 개발자를 위한 Kotlin 스물여섯째 걸음: backing field로 상태 변경 경계 세우기"
+description: "Kotlin 2.4.21의 backing field와 custom accessor를 Spring Boot·JPA 엔티티의 검증, 변경 추적, 영속화 경계에 맞춰 사용합니다."
+publishedAt: 2026-10-24T08:40:00+09:00
+draft: false
+category: "Backend"
+tags: ["Kotlin", "Spring Boot", "JPA", "Domain Model", "Encapsulation"]
+kind: "learning"
+heroImage: "../../assets/blog/kotlin-backing-field-persistence-boundary-2026-10-24/cover.webp"
+heroImageAlt: "Kotlin 도메인 객체의 보호된 내부 상태가 서버 모듈과 데이터 저장소 사이에서 통제된 전이로 이어지는 무텍스트 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 Kotlin 학습"
+lesson: 26
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 10월 24일 Kotlin 공식 release process와 properties 문서를 확인했습니다. 기준 안정 버전은
+> `Kotlin 2.4.21`이며, backing field와 custom accessor는 안정 문법입니다. 이 문법이 JPA dirty checking,
+> 트랜잭션, 동시성 제어를 대신하지는 않습니다.
+
+## 결론부터 말하면
+
+`private set`과 custom setter는 "누가 값을 바꿀 수 있는가"를 코드에 드러내는 도구입니다. Spring Boot에서
+도메인 객체의 상태를 바꿀 때는 setter를 열어 두기보다 **의미 있는 메서드에서 검증하고, 그 뒤 backing field를
+갱신**하는 편이 안전합니다. JPA가 field 접근인지 property 접근인지도 명시해, 프레임워크가 어느 경로로 값을
+읽고 쓰는지 추측하지 않게 만듭니다.
+
+- 외부에는 읽기 전용 상태를 보이고, 변경은 `confirm()`, `cancel()`처럼 업무 동사가 있는 메서드에 둡니다.
+- custom setter에 I/O, 이벤트 발행, 인증 주체 조회를 숨기지 않습니다. 실패·재시도·트랜잭션 경계가 흐려집니다.
+- JPA 매핑은 field/property access 중 하나를 일관되게 고르고, no-arg constructor와 proxy 요구 사항을 별도로 확인합니다.
+- backing field는 캡슐화 장치이지 분산 락이나 낙관적 락의 대체물이 아닙니다.
+
+<Mermaid title="외부 입력부터 상태 전이와 영속화까지의 경계">
+{`flowchart LR
+  Request["HTTP 요청 DTO"] --> Service["application service"]
+  Service --> Method["도메인 메서드\n검증과 상태 전이"]
+  Method --> Field["private backing field"]
+  Field --> Transaction["transaction 경계"]
+  Transaction --> Jpa["JPA persistence context"]
+  Jpa --> Database[("database")]
+  Method --> Event["명시적 domain event 또는 outbox"]
+`}
+</Mermaid>
+
+## `private set`은 공개 계약을 줄입니다
+
+Java bean 관점에서는 getter/setter를 함께 만들기 쉽습니다. Kotlin은 읽기와 쓰기의 가시성을 나눌 수 있어,
+API 사용자가 상태를 읽되 임의로 바꾸지는 못하게 표현하기 좋습니다.
+
+```kotlin
+class Invoice(initialStatus: InvoiceStatus = InvoiceStatus.DRAFT) {
+    var status: InvoiceStatus = initialStatus
+        private set
+
+    fun confirm() {
+        check(status == InvoiceStatus.DRAFT) { "초안만 확정할 수 있습니다." }
+        status = InvoiceStatus.CONFIRMED
+    }
+}
+
+enum class InvoiceStatus { DRAFT, CONFIRMED, CANCELLED }
+```
+
+controller가 `invoice.status = CONFIRMED`라고 쓸 수 없으므로, 상태 전이 규칙은 `confirm()` 한 곳에서 읽힙니다.
+이는 HTTP 응답 필드나 JSON 이름을 바꾸는 방식이 아닙니다. 기존 요청·응답 계약은 controller DTO에 남기고,
+도메인 내부의 변경 권한만 좁힙니다.
+
+| 필요 | 선택 | 피할 선택 |
+| --- | --- | --- |
+| 외부 읽기, 내부 통제 변경 | `var value ... private set` + 동사 메서드 | public setter에 업무 규칙을 분산 |
+| 계산된 읽기 값 | custom getter | getter마다 DB·원격 호출 |
+| 입력 정규화 | application/service 경계의 명시적 변환 | setter에 숨은 I/O·권한 검사 |
+| 동시 수정 감지 | `@Version` 등 영속성 전략 | backing field만으로 경쟁 조건 해결 기대 |
+
+## custom accessor에는 지역적이고 예측 가능한 규칙만 둡니다
+
+backing field `field`는 accessor 안에서 실제 저장값을 가리킵니다. 작은 정규화나 불변식은 적절하지만, accessor가
+예상 밖의 부작용을 만들면 디버깅이 어려워집니다.
+
+```kotlin
+class DisplayName(raw: String) {
+    var value: String = raw.trim()
+        private set
+
+    fun change(next: String) {
+        val normalized = next.trim()
+        require(normalized.length in 1..50) { "표시 이름 길이가 올바르지 않습니다." }
+        value = normalized
+    }
+}
+```
+
+`set(value) { field = value.trim() }`도 가능하지만, 변경 이유·검증·감사 맥락이 필요한 도메인이라면 `change()`처럼
+의미 있는 이름이 더 읽기 쉽습니다. 특히 setter 안에서 repository를 부르거나 메시지를 보내면 object 복원·테스트·JPA
+proxy 경로에서도 부작용이 실행될 수 있으므로 피합니다.
+
+## JPA 접근 방식은 상태 변경 규칙과 함께 결정합니다
+
+JPA는 annotation 위치에 따라 field access 또는 property access를 선택합니다. 한 엔티티 안에서 섞으면 framework가
+getter/setter를 통과하는지 불분명해질 수 있습니다. 아래는 field access를 명시해 영속화가 field를 다루고, 도메인
+변경은 메서드를 통하도록 한 예입니다.
+
+```kotlin
+@Entity
+@Access(AccessType.FIELD)
+class PurchaseOrder protected constructor() {
+    @Id
+    @GeneratedValue
+    private var id: Long? = null
+
+    @Enumerated(EnumType.STRING)
+    var status: OrderStatus = OrderStatus.PENDING
+        private set
+
+    fun pay() {
+        check(status == OrderStatus.PENDING) { "대기 상태에서만 결제할 수 있습니다." }
+        status = OrderStatus.PAID
+    }
+}
+```
+
+프로젝트의 JPA 설정과 Kotlin plugin(`all-open`, `no-arg`) 사용 여부는 실제 build에서 확인해야 합니다. 이 글의 코드는
+설계를 설명하기 위한 최소 예이며, 존재하는 테이블, column 이름, JSON 직렬화 규칙을 임의로 바꾸지 않습니다.
+
+## Java/Spring 개발자가 자주 하는 오해
+
+**"private setter면 항상 안전하다."** 아닙니다. 같은 entity를 두 transaction이 읽고 각각 상태를 바꾸면 마지막
+write가 앞선 변경을 덮을 수 있습니다. 필요한 경우 `@Version`, 적절한 isolation, 명시적 재시도 정책을 별도로 설계합니다.
+
+**"getter/setter가 있으니 JPA도 같은 규칙을 쓴다."** annotation 위치와 access type에 따라 다릅니다. 매핑 규칙은
+코드 리뷰와 integration test로 확인합니다.
+
+**"setter에 이벤트 발행을 넣으면 빠르다."** 저장 실패 뒤 이벤트만 나갈 수 있습니다. 업무 이벤트라면 transaction과
+outbox/발행 순서를 명시적으로 설계합니다.
+
+## 최소 연습과 점검표
+
+1. 기존 entity 하나에서 public setter 하나를 골라, 실제 외부 변경자가 필요한지 확인합니다.
+2. 변경이 업무 전이라면 `private set`과 동사 메서드로 바꾸는 작은 spike를 만듭니다.
+3. JPA annotation이 field와 property 중 어느 쪽에 붙어 있는지 한 가지 방식으로 확인합니다.
+4. 상태 전이 unit test와 저장 뒤 재조회 integration test를 분리합니다.
+5. 기존 API의 field, 상태 코드, 시간 형식과 값의 의미는 그대로 두고 regression test를 실행합니다.
+
+## 참고자료
+
+- [Kotlin release process](https://kotlinlang.org/docs/releases.html) - 2026년 10월 24일 확인, 안정 버전 `2.4.21`
+- [Kotlin properties](https://kotlinlang.org/docs/properties.html) - backing field, getter, setter의 동작
+- [Kotlin coding conventions](https://kotlinlang.org/docs/coding-conventions.html) - property와 함수 이름의 읽기 기준
+- [Jakarta Persistence `Access`](https://jakarta.ee/specifications/persistence/3.2/apidocs/jakarta.persistence/jakarta/persistence/access) - field/property access 선택
