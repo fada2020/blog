@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /수출 호조와 높은 장기금리를 같은 장부에 놓지 않기/ })
+    .getByRole("link", { name: /에이전트 표준부터 런타임 보안까지/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/saturday-market-exports-long-yields-risk-ledger-2026-10-24\/$/,
+    /\/blog\/posts\/weekly-it-trends-2026-10-27\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "토요일 주식 학습: 수출 호조와 높은 장기금리를 같은 장부에 놓지 않기",
+    "10월 넷째 주 IT 동향: 에이전트 표준부터 런타임 보안까지",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "세계 지도, 컨테이너선, 반도체 칩, 교차하는 금리 곡선과 위험 방패를 배치한 무텍스트 시장 점검 다이어그램",
+    "스킬 문서, 보안 방패가 있는 런타임, 브라우저 검사창과 패키지 보관함을 연결한 기술 동향 다이어그램",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /수출 호조와 높은 장기금리를 같은 장부에 놓지 않기/,
+      name: /에이전트 표준부터 런타임 보안까지/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /backing field로 상태 변경 경계 세우기/,
+      name: /한글 입력과 저장값의 경계/,
     }),
   ).toBeVisible();
 });

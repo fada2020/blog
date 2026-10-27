@@ -9,15 +9,15 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(141);
+  expect(entries).toHaveLength(143);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "토요일 주식 학습: 수출 호조와 높은 장기금리를 같은 장부에 놓지 않기",
+    "10월 넷째 주 IT 동향: 에이전트 표준부터 런타임 보안까지",
   );
   expect(entries[0].href).toBe(
-    "/blog/posts/saturday-market-exports-long-yields-risk-ledger-2026-10-24/",
+    "/blog/posts/weekly-it-trends-2026-10-27/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });

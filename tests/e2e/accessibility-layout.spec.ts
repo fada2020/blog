@@ -137,7 +137,7 @@ test("홈의 주요 링크와 테마 버튼에 키보드 초점이 표시된다"
   await expectKeyboardFocusOutline(page, page.getByRole("link", { name: "Field Notes" }));
   await expectKeyboardFocusOutline(
     page,
-    page.getByRole("link", { name: /수출 호조와 높은 장기금리를 같은 장부에 놓지 않기/ }),
+    page.getByRole("link", { name: /에이전트 표준부터 런타임 보안까지/ }),
   );
   await expectKeyboardFocusOutline(page, page.getByRole("button", { name: "테마 전환" }));
 });
@@ -200,11 +200,11 @@ test("긴 글 콘텐츠와 Mermaid가 모바일 본문을 넘지 않는다", asy
   expect(overflowingElements).toEqual([]);
 });
 
-test("새 시장 글은 모바일에서 광고 슬롯을 포함해 가로로 넘치지 않는다", async ({ page }) => {
+test("새 기술 동향 글은 모바일에서 광고 슬롯을 포함해 가로로 넘치지 않는다", async ({ page }) => {
   await page.setViewportSize(viewports[0]);
   await gotoDomReady(
     page,
-    "/blog/posts/saturday-market-exports-long-yields-risk-ledger-2026-10-24/",
+    "/blog/posts/weekly-it-trends-2026-10-27/",
   );
 
   const hasHorizontalOverflow = await page.evaluate(

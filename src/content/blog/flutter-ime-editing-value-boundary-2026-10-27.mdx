@@ -1,0 +1,228 @@
+---
+title: "Spring Boot 개발자를 위한 Flutter 스물아홉째 걸음: 한글 입력과 저장값의 경계"
+description: "TextEditingController의 text·selection·composing을 분리하고, 한글 IME와 이모지 길이 제한을 깨뜨리지 않는 입력 화면을 만듭니다."
+publishedAt: 2026-10-27T09:00:00+09:00
+draft: false
+category: "Frontend"
+tags: ["Flutter", "Dart", "Spring Boot", "IME", "Forms"]
+kind: "learning"
+heroImage: "../../assets/blog/flutter-ime-editing-value-boundary-2026-10-27/cover.webp"
+heroImageAlt: "모바일 입력창의 조합 중인 문자 블록이 확정값 카드와 저장소로 나뉘어 이동하는 입력 경계 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 모바일 앱 학습"
+lesson: 29
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 10월 27일 KST 기준입니다. Flutter 공식 원격 `stable` 브랜치와 `3.47.8` 태그가
+> 같은 커밋 `737ba8f`를 가리키는 것을 확인했습니다.
+> 기준 안정 버전은 [Flutter 3.47.8](https://github.com/flutter/flutter/releases/tag/3.47.8)입니다.
+> [SDK archive](https://docs.flutter.dev/install/archive)의 배포 JSON은 조회되지 않아 공식 브랜치와 태그로 교차 확인했습니다.
+> 아래 예제는 stable API만 사용하며, 로컬 예제 검사 환경은 별도로 글 끝에 기록합니다.
+
+## 결론부터 말하면
+
+**입력창에서 보이는 문자열은 아직 저장해도 되는 값과 같지 않습니다.** 한글을 입력하는 동안 키보드는
+글자를 조합하고, 사용자는 커서를 옮기며, 앱은 그 편집 상태를 화면에 돌려줍니다. 이 과정을 매번
+`trim()`하거나 controller listener에서 덮어쓰면 입력이 끊기거나 커서가 튈 수 있습니다.
+
+이번 학습은 폼의 필수값 검증 다음 단계입니다. 화면에서 편집 중인 값과 서버로 보낼 확정값을 나누고,
+글자 수를 셀 때 UTF-16 길이와 사용자가 느끼는 글자 수를 구분하겠습니다.
+
+## Java와 Spring에서는 어떻게 다뤘는가
+
+Spring MVC에서는 요청 본문을 DTO로 받고 Bean Validation으로 검증하는 흐름이 익숙합니다.
+서버에 도착한 문자열에는 보통 사용자의 커서 위치나 조합 중인 구간이 없습니다. 반면 클라이언트는
+키보드와 실시간으로 대화합니다. Flutter의 `TextEditingValue`는 문자열만 담는 DTO가 아닙니다.
+
+| 익숙한 서버 개념 | Flutter 입력에서 추가할 구분 |
+|---|---|
+| 요청 DTO의 문자열 | 편집 중인 `text`와 제출 시점의 값 |
+| Bean Validation | 입력 편의용 제한과 서버의 최종 검증 |
+| 요청 단위 처리 | 화면이 유지되는 동안 controller 소유 |
+| 저장 전 정규화 | IME 조합 완료와 제출 시점 확인 |
+
+Java의 `String.length()`와 Dart의 `String.length` 모두 사용자가 보는 글자 수를 항상 나타내지는 않습니다.
+문자열 제한을 API 계약으로 정할 때 바이트 수, 코드 포인트 수, grapheme cluster 수 중 무엇인지 합의해야 합니다.
+
+## text, selection, composing은 함께 움직입니다
+
+[TextEditingController 공식 API](https://api.flutter.dev/flutter/widgets/TextEditingController-class.html)는
+listener 안에서 값을 수정하면 재귀 알림이 발생할 수 있고, composing 변경은 일부 키보드와 충돌할 수 있다고 설명합니다.
+`text`를 직접 설정하면 selection과 composing도 초기화됩니다. 문자열과 커서 위치를 함께 바꾸려면
+완성된 `TextEditingValue`를 `value`에 한 번에 넣는 방식이 필요합니다.
+
+- `text`: 지금 입력창에 들어 있는 문자열입니다.
+- `selection`: 선택 범위 또는 커서 위치입니다.
+- `composing`: IME가 아직 조합하고 있는 범위입니다.
+
+[TextInputFormatter 공식 API](https://api.flutter.dev/flutter/services/TextInputFormatter-class.html)는
+조합 중인 텍스트를 고치지 말고 composing이 접힌 상태에서 변경하라고 안내합니다. 화면에서 한글이 보인다는
+이유만으로 조합이 끝났다고 가정하지 않겠습니다.
+
+<Mermaid title="편집 상태에서 저장값으로 넘어가는 경계">
+{`flowchart TD
+  Keyboard["키보드와 IME"] --> Editing["text / selection / composing"]
+  Editing --> Display["화면과 글자 수 표시"]
+  Editing --> Submit["제출 시 조합 완료 확인"]
+  Submit --> Normalize["공백 정리와 필수값 검증"]
+  Normalize --> Payload["서버 요청 값"]
+  Payload --> Validate["서버의 최종 검증"]
+`}
+</Mermaid>
+
+## 최소 실행 예제
+
+별도 패키지를 추가하지 않고 `flutter create ime_lab`으로 만든 앱의 `lib/main.dart`를 다음 코드로 바꿉니다.
+사용자 정의 식별자는 스네이크케이스로 작성했습니다. `createState`, `initState`처럼 Flutter가 정한 override와
+생성자 인자 이름은 API 계약대로 사용합니다.
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+void main() => runApp(const MaterialApp(home: NameEditor()));
+
+class NameEditor extends StatefulWidget {
+  const NameEditor({super.key});
+
+  @override
+  State<NameEditor> createState() => _NameEditorState();
+}
+
+class _NameEditorState extends State<NameEditor> {
+  final _name_controller = TextEditingController();
+  String? _saved_name;
+  String? _error_message;
+
+  void _submit_name() {
+    final editing_value = _name_controller.value;
+    if (!editing_value.composing.isCollapsed) {
+      setState(() {
+        _error_message = '키보드에서 글자 조합을 마친 뒤 다시 제출해 주세요.';
+      });
+      return;
+    }
+    final submitted_name = editing_value.text.trim();
+    setState(() {
+      _error_message = submitted_name.isEmpty ? '표시 이름을 입력해 주세요.' : null;
+      if (_error_message == null) {
+        _saved_name = submitted_name;
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _name_controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('입력과 저장')),
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              controller: _name_controller,
+              inputFormatters: [
+                LengthLimitingTextInputFormatter(
+                  20,
+                  maxLengthEnforcement:
+                      MaxLengthEnforcement.truncateAfterCompositionEnds,
+                ),
+              ],
+              decoration: InputDecoration(
+                labelText: '표시 이름',
+                errorText: _error_message,
+              ),
+              onSubmitted: (_) => _submit_name(),
+            ),
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _name_controller,
+              builder: (context, editing_value, child) {
+                final visible_count = editing_value.text.characters.length;
+                final editing_status = editing_value.composing.isCollapsed
+                    ? '조합 완료'
+                    : '조합 중';
+                return Text('$visible_count / 20 · $editing_status');
+              },
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: _submit_name,
+              child: const Text('로컬 제출'),
+            ),
+            Text('제출 결과: ${_saved_name ?? "아직 없음"}'),
+          ],
+        ),
+      ),
+    );
+  }
+}
+```
+
+이 예제는 네트워크 요청이나 영구 저장을 하지 않습니다. `로컬 제출`을 누르면 조합 상태를 확인하고,
+공백을 정리한 값을 화면 상태에 보관합니다. 실제 앱에서는 이 경계 뒤에서 repository를 호출합니다.
+요청 필드와 서버 검증 규칙은 기존 계약에 맞춰야 합니다.
+
+`LengthLimitingTextInputFormatter`는 사용자가 보는 문자 단위를 고려합니다. 조합 완료 뒤 잘라내는 정책을
+명시했으므로 조합 중에는 표시가 잠시 20을 넘을 수 있습니다. 이는 서버의 길이 제한을 없앤다는 뜻이 아닙니다.
+[MaxLengthEnforcement 설명](https://api.flutter.dev/flutter/services/MaxLengthEnforcement.html)을 함께 확인하면
+플랫폼별 기본값에 맡기는 것과 명시적인 정책을 선택하는 차이를 이해할 수 있습니다.
+
+## 실제 값으로 경계를 확인하기
+
+| 상황 | 편집 상태 | 제출 결과 |
+|---|---|---|
+| 공백을 포함한 이름 | `"  새싹  "`, 조합 완료 | `"새싹"` |
+| 공백만 입력 | `"   "`, 조합 완료 | 필수값 오류, 새 저장 없음 |
+| 한글 조합 중 | 유효한 composing 범위 | 제출 보류 안내 |
+| 이모지 `👨‍👩‍👦` | 화면상 한 글자 | grapheme 기준 1로 계산 |
+| 조합 완료 후 21글자 | 길이 제한 적용 | 최대 20글자 |
+
+`trim()` 결과를 controller에 다시 넣지 않으므로 편집창에는 사용자가 입력한 공백이 남고 제출값만 달라집니다.
+제품에서 확정값을 입력창에도 반영하려면 제출 성공 뒤 별도 동작으로 정의하고, 커서와 composing을 함께 처리해야 합니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫째, controller를 단순 DTO처럼 생각하고 `build()`마다 새로 만드는 경우입니다. 편집 상태가 화면 생명주기를
+따라 유지되도록 State가 소유하고 `dispose()`에서 해제했습니다.
+
+둘째, 서버 정규화와 같은 코드를 매 키 입력마다 실행하는 경우입니다. 서버는 완성된 요청을 처리하지만,
+클라이언트는 IME와 커서를 함께 다룹니다. 입력 중 포맷팅과 제출 시 정규화를 다른 책임으로 두겠습니다.
+
+셋째, 클라이언트에서 20글자를 제한했으니 서버 검증도 끝났다고 보는 경우입니다. 변조된 요청은 언제든 들어올 수
+있습니다. 사용자 편의와 데이터 계약 검증은 각각 필요합니다.
+
+넷째, 위젯 테스트 통과를 모든 실제 키보드의 검증으로 해석하는 경우입니다. composing 범위를 합성한 테스트는
+상태 분기 확인에 유용하지만, Android·iOS 실제 한글 키보드의 동작까지 입증하지는 않습니다.
+
+## 연습 문제와 검증 기록
+
+1. `"  새싹  "`을 제출하고 입력창과 제출 결과가 서로 다른 이유를 설명해 보세요.
+2. 가족 이모지와 결합 문자를 넣고 `length`, `runes.length`, `characters.length`를 비교해 보세요.
+3. 조합 중인 `TextEditingValue`를 테스트에서 주입해 제출이 보류되는지 확인해 보세요.
+4. 실제 Android·iOS 한글 키보드로 20글자 경계를 넘기고, 중간 커서 이동과 붙여넣기를 확인해 보세요.
+5. 서버 계약이 UTF-8 바이트 제한이라면 화면 안내와 서버 오류를 어떻게 나눌지 정해 보세요.
+
+발행 시 최소 예제를 별도 임시 Flutter 프로젝트로 추출해 정적 분석과 위젯 테스트를 실행했습니다.
+실행 환경은 로컬 Flutter 3.47.4 / Dart 3.13.3이며, 최신 안정판 3.47.8에서 실기기 IME를 실행한 결과로
+확대 해석하지 않습니다. 테스트는 공백 정리, 빈 값 거절, 조합 중 제출 보류, grapheme 길이와 조합 완료 후
+길이 제한을 확인합니다. 실제 키보드 검증은 위 연습 문제에 남겼습니다.
+
+## 이어서 읽기
+
+- [폼 입력과 validation](/blog/posts/flutter-form-validation-2026-08-26/)
+- [l10n으로 언어와 형식의 경계 세우기](/blog/posts/flutter-localization-boundary-2026-10-21/)
+- [TextEditingController 공식 API](https://api.flutter.dev/flutter/widgets/TextEditingController-class.html)
+- [TextInputFormatter 공식 API](https://api.flutter.dev/flutter/services/TextInputFormatter-class.html)
+- [길이 제한 formatter 공식 API](https://api.flutter.dev/flutter/services/LengthLimitingTextInputFormatter-class.html)
