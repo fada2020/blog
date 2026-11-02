@@ -200,11 +200,11 @@ test("긴 글 콘텐츠와 Mermaid가 모바일 본문을 넘지 않는다", asy
   expect(overflowingElements).toEqual([]);
 });
 
-test("새 기술 동향 글은 모바일에서 광고 슬롯을 포함해 가로로 넘치지 않는다", async ({ page }) => {
+test("새 시장 학습 글은 모바일에서 광고 슬롯을 포함해 가로로 넘치지 않는다", async ({ page }) => {
   await page.setViewportSize(viewports[0]);
   await gotoDomReady(
     page,
-    "/blog/posts/weekly-it-trends-2026-10-27/",
+    "/blog/posts/sunday-market-transmission-2026-11-02/",
   );
 
   const hasHorizontalOverflow = await page.evaluate(

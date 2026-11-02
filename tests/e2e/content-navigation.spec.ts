@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /에이전트 표준부터 런타임 보안까지/ })
+    .getByRole("link", { name: /미국 금리와 반도체 수출을 한국 시장으로 연결하는 법/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/weekly-it-trends-2026-10-27\/$/,
+    /\/blog\/posts\/sunday-market-transmission-2026-11-02\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "10월 넷째 주 IT 동향: 에이전트 표준부터 런타임 보안까지",
+    "주식 학습: 미국 금리와 반도체 수출을 한국 시장으로 연결하는 법",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "스킬 문서, 보안 방패가 있는 런타임, 브라우저 검사창과 패키지 보관함을 연결한 기술 동향 다이어그램",
+    "국채금리에서 환율과 원유를 거쳐 반도체와 한국 주식시장으로 이어지는 청록색과 금색 흐름도",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /에이전트 표준부터 런타임 보안까지/,
+      name: /미국 금리와 반도체 수출을 한국 시장으로 연결하는 법/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /한글 입력과 저장값의 경계/,
+      name: /에이전트 표준부터 런타임 보안까지/,
     }),
   ).toBeVisible();
 });
