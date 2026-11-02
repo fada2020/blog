@@ -1,0 +1,213 @@
+---
+title: "Spring Boot 개발자를 위한 Flutter 서른째 걸음: 비동기 검색 응답의 순서 보장"
+description: "요청 번호와 mounted 검사로 늦은 검색 응답을 무시하고, 화면 생명주기와 네트워크 취소의 책임을 구분합니다."
+publishedAt: 2026-11-02T09:10:00+09:00
+draft: false
+category: "Frontend"
+tags: ["Flutter", "Dart", "Spring Boot", "Async", "Search"]
+kind: "learning"
+heroImage: "../../assets/blog/flutter-async-search-response-order-2026-11-02/cover.webp"
+heroImageAlt: "모바일 검색창으로 향하는 두 응답 중 오래된 경로는 흐려지고 최신 응답 카드만 연결되는 다이어그램"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 모바일 앱 학습"
+lesson: 30
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보**
+>
+> 2026년 11월 2일 KST 기준, 공식 Flutter 원격 `stable`과 `3.47.9` 태그가 같은 커밋
+> `c197ca5`를 가리킵니다. 기준 안정 버전은 Flutter 3.47.9입니다. preview는 기준에서 제외했습니다.
+> [공식 SDK archive](https://docs.flutter.dev/install/archive)와
+> [공식 태그](https://github.com/flutter/flutter/releases/tag/3.47.9)를 참고했습니다.
+> 예제 실행 환경과 검증 범위는 글 끝에 별도로 기록합니다.
+
+## 이번 주 개념: 마지막 도착과 마지막 요청은 다릅니다
+
+검색창에 `a`를 입력한 뒤 `ab`로 바꿨다고 해 봅시다. 첫 요청이 800ms, 두 번째 요청이 100ms 걸리면
+화면에 필요한 것은 먼저 도착한 `ab`의 결과입니다. 나중에 도착한 `a`가 화면을 덮으면 입력창과 목록이 어긋납니다.
+서버가 두 요청을 정상 처리했어도 클라이언트에는 오류처럼 보입니다.
+
+오늘은 **현재 요청 번호와 일치하는 응답만 화면에 반영**하겠습니다. 검색어가 비었을 때와 화면을 떠났을 때도
+진행 중 응답의 반영 권한을 없앱니다. 이것은 서버 작업을 중단시키는 네트워크 취소와는 다른 책임입니다.
+
+## Java와 Spring에서는 어떻게 다뤘는가
+
+Spring MVC 컨트롤러는 각각의 HTTP 요청에 응답합니다. 서버가 먼저 받은 요청을 먼저 완료하거나,
+응답 순서가 사용자의 현재 화면 상태와 일치한다고 보장하지 않습니다. 같은 세션의 요청도 별개입니다.
+
+| 서버에서 익숙한 구분 | 화면에서 필요한 구분 |
+|---|---|
+| 요청별 DTO와 응답 | 지금 검색창이 원하는 응답 |
+| 처리 성공과 실패 | 현재 요청의 성공과 실패 |
+| 요청 종료 | 위젯이 아직 살아 있는지 |
+| 요청 취소 | 전송 취소와 결과 무시 |
+
+Java의 `CompletableFuture`도 완료 순서를 입력 순서로 바꾸지는 않습니다. Dart의 `await` 역시 한 함수의
+후속 실행을 기다릴 뿐, 이미 시작된 다른 호출과의 우선순위를 정하지 않습니다.
+
+## Flutter에서는 무엇이 다른가
+
+[State.mounted](https://api.flutter.dev/flutter/widgets/State/mounted.html)는 State가 트리에 연결되어 있는지를
+나타냅니다. [setState 공식 설명](https://api.flutter.dev/flutter/widgets/State/setState.html)에 따라 dispose 이후
+화면 갱신을 실행하지 않아야 합니다. 그러나 `mounted`만 검사하면 살아 있는 화면에 **오래된 응답**이 들어오는 문제는 남습니다.
+
+[FutureBuilder](https://api.flutter.dev/flutter/widgets/FutureBuilder-class.html)는 Future의 snapshot을 화면에
+연결합니다. Future를 `build()`에서 매번 새로 만들지 않는다는 규칙과, Future 교체 중 이전 데이터가 유지될 수 있다는
+규칙도 함께 이해해야 합니다. 이번에는 중간 상태를 직접 보여 주기 위해 State에서 결과 반영 권한을 관리합니다.
+
+<Mermaid title="응답이 화면을 갱신할 수 있는 조건">
+{`flowchart TD
+  Input["새 검색어"] --> Version["요청 번호 증가"]
+  Version --> Request["비동기 조회"]
+  Request --> Alive["mounted 확인"]
+  Alive --> Current["현재 요청 번호와 비교"]
+  Current --> Render["일치할 때만 화면 갱신"]
+`}
+</Mermaid>
+
+## 최소 실행 예제
+
+`flutter create search_order_lab`으로 만든 프로젝트의 `lib/main.dart`를 다음 코드로 바꿉니다.
+외부 패키지나 실제 HTTP API 없이 지연 순서를 재현합니다. 직접 정의한 변수와 메서드는 스네이크케이스이며,
+`createState`, `setState`와 같은 프레임워크 API는 원래 계약을 유지합니다.
+
+```dart
+import 'package:flutter/material.dart';
+
+void main() => runApp(const MaterialApp(home: SearchPage()));
+
+Future<List<String>> search_items(String query) async {
+  final delay_ms = query.length == 1 ? 800 : 100;
+  await Future<void>.delayed(Duration(milliseconds: delay_ms));
+  if (query == 'error') throw StateError('조회 실패');
+  return ['$query 결과'];
+}
+
+class SearchPage extends StatefulWidget {
+  const SearchPage({super.key});
+
+  @override
+  State<SearchPage> createState() => _SearchPageState();
+}
+
+class _SearchPageState extends State<SearchPage> {
+  int _request_id = 0;
+  List<String> _items = [];
+  bool _loading = false;
+  String? _error_message;
+
+  Future<void> _search(String input_value) async {
+    final current_id = ++_request_id;
+    final query = input_value.trim();
+    setState(() {
+      _items = [];
+      _error_message = null;
+      _loading = query.isNotEmpty;
+    });
+    if (query.isEmpty) return;
+
+    try {
+      final result = await search_items(query);
+      if (!mounted || current_id != _request_id) return;
+      setState(() {
+        _items = result;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted || current_id != _request_id) return;
+      setState(() {
+        _error_message = '조회하지 못했습니다. 다시 입력해 주세요.';
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _request_id++;
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('검색 응답 순서')),
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              onChanged: _search,
+              decoration: const InputDecoration(labelText: '검색어'),
+            ),
+            if (_loading) const LinearProgressIndicator(),
+            if (_error_message != null) Text(_error_message!),
+            for (final item in _items) Text(item),
+          ],
+        ),
+      ),
+    );
+  }
+}
+```
+
+예제는 새 검색을 시작할 때 이전 목록을 지우는 UX를 선택했습니다. 이전 목록을 유지하는 제품이라면
+목록이 어떤 검색어의 결과인지 표시하고, 로딩 중인 새 검색과 섞이지 않도록 설계해야 합니다.
+
+## 실제 입력과 결과로 확인하기
+
+| 입력 순서 | 완료 순서 | 최종 화면 |
+|---|---|---|
+| `a` 다음 `ab` | `ab` 다음 `a` | `ab 결과` 유지 |
+| `a` 다음 공백 | 공백 처리 다음 `a` | 빈 목록 유지 |
+| `error` | 실패 | 오류 안내, 로딩 종료 |
+| 검색 뒤 화면 종료 | 응답은 나중에 완료 | 종료된 State 갱신 없음 |
+
+실제 요청에 적용할 때도 서버 필드나 상태 코드를 바꿀 필요는 없습니다. 예를 들어 기존 API가
+`GET /items?q=ab`에 `{"items":["ab 결과"]}`를 응답한다면 repository가 목록을 파싱하고,
+화면은 그 결과를 적용할지 결정합니다. 위 API는 설명용 계약이며 예제는 네트워크를 호출하지 않습니다.
+
+성공 응답뿐 아니라 실패 응답도 요청 번호를 검사합니다. 오래된 요청이 실패했다고 최신 결과 위에
+오류 안내를 덮어쓰면 같은 문제가 다른 모습으로 반복되기 때문입니다.
+
+## debounce, 취소, 응답 무시는 서로 다릅니다
+
+- debounce는 잠시 입력이 멈춘 뒤 조회해 요청 수를 줄입니다.
+- 전송 취소는 HTTP 클라이언트가 지원하는 방식으로 진행 중 작업을 중단하려고 시도합니다.
+- 요청 번호는 완료된 결과가 현재 화면을 바꿀 수 있는지 결정합니다.
+
+debounce를 넣어도 이미 시작된 요청이 늦게 끝날 수 있습니다. 응답을 무시해도 서버 계산이나 요금이
+사라지지는 않습니다. 이 예제는 정확한 화면 반영을 다루며 실제 HTTP 취소를 구현하지 않습니다.
+
+## Java 개발자가 자주 하는 오해
+
+첫째, `await`를 사용했으니 모든 검색이 순차 실행된다고 생각하는 것입니다. 입력 callback은 여러 번 실행되고
+각 호출은 별개의 Future를 기다립니다. 둘째, 성공 응답에만 번호를 검사하고 오류 분기는 무조건 표시하는 것입니다.
+셋째, 빈 검색어에서는 아무것도 하지 않고 반환해 이전 요청의 반영 권한을 남겨 두는 것입니다.
+
+마지막으로 화면에서 결과를 무시한 것을 서버 취소 성공으로 기록하면 안 됩니다. 취소 여부가 제품에 중요하다면
+클라이언트와 서버 각각에서 별도의 근거를 확인해야 합니다.
+
+## 연습 문제와 검증 범위
+
+1. `a`와 `ab`를 빠르게 입력하고 800ms 이후에도 `ab 결과`가 유지되는지 확인해 보세요.
+2. 첫 요청이 진행 중일 때 입력을 지우고 목록이 다시 나타나지 않는지 확인해 보세요.
+3. 오래된 실패 뒤 최신 성공이 오는 경우와 그 반대 경우를 가짜 repository로 재현해 보세요.
+4. 300ms debounce를 추가해도 요청 번호 검사가 필요한 이유를 설명해 보세요.
+
+예제는 별도 임시 프로젝트에서 로컬 Flutter 3.47.4 / Dart 3.13.3으로 분석하고 위젯 테스트했습니다.
+응답 역전, 빈 입력, 현재 실패, 화면 종료를 검사했습니다. 기준 안정판 3.47.9의 실기기·실제 네트워크 검증을
+수행한 것으로 해석하지 않습니다.
+
+## 참고자료와 이어서 읽기
+
+- [Flutter 공식 SDK archive](https://docs.flutter.dev/install/archive)
+- [FutureBuilder API](https://api.flutter.dev/flutter/widgets/FutureBuilder-class.html)
+- [State.mounted](https://api.flutter.dev/flutter/widgets/State/mounted.html)
+- [State.setState](https://api.flutter.dev/flutter/widgets/State/setState.html)
+- [인터넷 데이터 조회 공식 실습](https://docs.flutter.dev/cookbook/networking/fetch-data)
+- [이전 학습: 한글 입력과 저장값의 경계](/blog/posts/flutter-ime-editing-value-boundary-2026-10-27/)

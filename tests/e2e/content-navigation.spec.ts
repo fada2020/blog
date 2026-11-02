@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /미국 금리와 반도체 수출을 한국 시장으로 연결하는 법/ })
+    .getByRole("link", { name: /예금 만기와 생활비 날짜 맞추기/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/sunday-market-transmission-2026-11-02\/$/,
+    /\/blog\/posts\/monday-money-deposit-maturity-calendar-2026-11-02\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "주식 학습: 미국 금리와 반도체 수출을 한국 시장으로 연결하는 법",
+    "월요일 경제 기초: 예금 만기와 생활비 날짜 맞추기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "국채금리에서 환율과 원유를 거쳐 반도체와 한국 주식시장으로 이어지는 청록색과 금색 흐름도",
+    "생활비 트레이와 세 개의 저축 통이 달력 순서로 이어지는 예금 만기 사다리 일러스트",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /미국 금리와 반도체 수출을 한국 시장으로 연결하는 법/,
+      name: /예금 만기와 생활비 날짜 맞추기/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /에이전트 표준부터 런타임 보안까지/,
+      name: /비동기 검색 응답의 순서 보장/,
     }),
   ).toBeVisible();
 });
@@ -158,7 +158,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page).toHaveURL(/\/blog\/kinds\/learning\/page\/2\/$/);
   await expect(
     page.getByRole("link", {
-      name: "Spring Boot 개발자를 위한 Flutter 스무째 걸음: AnimationController 생명주기 다루기",
+      name: "Spring Boot 개발자를 위한 Kotlin 스물세째 걸음: 취소 뒤 정리 경계 세우기",
     }),
   ).toBeVisible();
 });
