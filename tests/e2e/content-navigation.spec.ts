@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /예금 만기와 생활비 날짜 맞추기/ })
+    .getByRole("link", { name: /Firefox 159·vcpkg·Grok Bot의 운영 변화/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/monday-money-deposit-maturity-calendar-2026-11-02\/$/,
+    /\/blog\/posts\/weekly-it-trends-2026-11-03\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "월요일 경제 기초: 예금 만기와 생활비 날짜 맞추기",
+    "이번 주 IT 기술 동향: Firefox 159·vcpkg·Grok Bot의 운영 변화",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "생활비 트레이와 세 개의 저축 통이 달력 순서로 이어지는 예금 만기 사다리 일러스트",
+    "브라우저 창과 패키지 블록과 분석 로봇이 연결된 세 가지 기술 동향 일러스트",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /예금 만기와 생활비 날짜 맞추기/,
+      name: /Firefox 159·vcpkg·Grok Bot의 운영 변화/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /비동기 검색 응답의 순서 보장/,
+      name: /debounce와 타이머 해제/,
     }),
   ).toBeVisible();
 });
