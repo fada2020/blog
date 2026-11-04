@@ -1,0 +1,200 @@
+---
+title: "Spring Boot 개발자를 위한 Flutter 서른두째 걸음: 조회 대상이 바뀌는 FutureBuilder"
+description: "didUpdateWidget에서 조회 대상 변경을 감지하고, 이전 snapshot 데이터가 새 대상의 결과처럼 보이지 않도록 Future 수명과 표시 정책을 분리합니다."
+publishedAt: 2026-11-04T08:40:00+09:00
+draft: false
+category: "Frontend"
+tags: ["Flutter", "Dart", "Spring Boot", "Async", "Lifecycle"]
+kind: "learning"
+heroImage: "../../assets/blog/flutter-futurebuilder-parameter-lifecycle-2026-11-04/cover.webp"
+heroImageAlt: "모바일 화면의 데이터 캡슐을 고정한 받침대 주위로 재빌드 화살표가 도는 일러스트"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 모바일 앱 학습"
+lesson: 32
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 기준: 2026년 11월 4일 KST**
+>
+> 공식 Flutter `stable`과 `3.47.9` 태그가 같은 커밋 `c197ca5`인지 확인했습니다.
+> 기준 안정판은 Flutter 3.47.9입니다. 예제의 로컬 실행 버전과 검증 범위는 마지막에 따로 적었습니다.
+
+## 이번 주 개념: 화면의 수명과 조회 대상의 수명은 다릅니다
+
+[3강](/blog/posts/flutter-async-data-2026-08-25/)에서는 Future를 build 밖에서 만들었습니다.
+이번에는 **같은 State를 유지한 채 부모가 조회 대상만 바꾸는 경우**를 다룹니다.
+`initState()`에서 한 번 조회하면 재빌드 중 중복 요청은 막지만, 대상 변경까지 처리하지는 못합니다.
+
+가령 목록에서 `item_a`를 선택한 뒤 같은 상세 패널에 `item_b`를 넘깁니다. 부모는 새 Widget 설정을 만들고
+기존 State를 재사용할 수 있습니다. 이때 초기화 코드는 다시 실행되지 않습니다. 대상 변경을 감지해 Future를
+교체하고, 교체 직후 남아 있을 수 있는 이전 데이터를 어떻게 표시할지 별도로 정해야 합니다.
+
+## Java와 Spring에서는 어떻게 다뤘는가
+
+Spring Controller의 `GET /items/item_a`와 `GET /items/item_b`는 별개 요청입니다.
+브라우저나 모바일의 상세 화면은 더 오래 살아 있어서 두 요청을 같은 화면 객체가 처리할 수 있습니다.
+서버의 request scope를 Flutter State와 일대일로 대응시키면 대상 변경을 놓치기 쉽습니다.
+
+| 서버에서 익숙한 경계 | 화면에서 확인할 경계 |
+|---|---|
+| 요청마다 다른 경로 변수 | 부모가 넘기는 `item_id` |
+| 요청 시작 시 Service 호출 | 초기화 또는 대상 변경 때 Future 생성 |
+| 응답 DTO의 소유 대상 | 현재 대상과 표시 데이터의 일치 |
+
+여기서 `item_id`는 예제의 공개용 식별자입니다. 실제 API 계약을 고치거나 데이터를 저장하는 실습은 아닙니다.
+
+## Flutter에서는 무엇이 다른가
+
+공식 [didUpdateWidget](https://api.flutter.dev/flutter/widgets/State/didUpdateWidget.html)은
+같은 runtime type과 key로 Widget 설정이 교체될 때 호출됩니다. 뒤이어 build가 실행되므로 이 메서드에서
+필드를 바꾸기 위해 추가 `setState()`를 호출할 필요는 없습니다. 단, 부모가 key까지 바꾸면 새 State가
+만들어질 수 있으며 여기서 다루는 재사용 경로와 다릅니다.
+
+공식 [FutureBuilder](https://api.flutter.dev/flutter/widgets/FutureBuilder-class.html)는 Future 교체 때
+이전 data/error가 snapshot에 남을 수 있다고 설명합니다. 완료된 Future를 새로 넣어도 잠깐 waiting 상태가
+생길 수 있습니다. 따라서 callback 호출 횟수나 모든 중간 snapshot을 전제로 부수효과를 실행하면 안 됩니다.
+
+이 예제는 대상이 달라진 뒤에는 이전 내용을 보여 주지 않는 정책을 택했습니다. waiting을 먼저 처리합니다.
+같은 대상의 새로고침 중 이전 내용을 유지하려면 loading 표시와 데이터의 대상 정보를 함께 설계해야 합니다.
+
+<Mermaid title="같은 State에서 조회 대상이 바뀌는 경로">
+{`flowchart TD
+  Parent["부모 설정 변경"] --> Compare["이전 item_id와 비교"]
+  Compare -->|같음| Keep["기존 Future 유지"]
+  Compare -->|다름| Replace["새 Future 생성"]
+  Replace --> Wait["이전 내용 숨기고 대기 표시"]
+  Wait --> Result["현재 Future 완료 결과 표시"]
+`}
+</Mermaid>
+
+## 최소 실행 예제
+
+새 Flutter 프로젝트의 `lib/main.dart`에 넣습니다. 외부 패키지와 HTTP 서버는 필요 없습니다.
+프레임워크 override와 타입을 제외한 직접 정의 함수·변수는 스네이크케이스로 작성했습니다.
+
+```dart
+import 'package:flutter/material.dart';
+
+void main() => runApp(const MaterialApp(home: DemoPage()));
+
+Future<String> load_item(String item_id) async {
+  await Future<void>.delayed(const Duration(milliseconds: 400));
+  return '$item_id 상세';
+}
+
+class DemoPage extends StatefulWidget {
+  const DemoPage({super.key});
+  @override
+  State<DemoPage> createState() => _DemoPageState();
+}
+
+class _DemoPageState extends State<DemoPage> {
+  String _item_id = 'item_a';
+  int _rebuild_count = 0;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('조회 대상 실습')),
+    body: Column(children: [
+      Text('부모 재빌드 $_rebuild_count'),
+      ElevatedButton(
+        onPressed: () => setState(() => _rebuild_count++),
+        child: const Text('대상 유지 재빌드'),
+      ),
+      ElevatedButton(
+        onPressed: () => setState(() {
+          _item_id = _item_id == 'item_a' ? 'item_b' : 'item_a';
+        }),
+        child: const Text('대상 변경'),
+      ),
+      ItemPanel(item_id: _item_id, loader: load_item),
+    ]),
+  );
+}
+
+class ItemPanel extends StatefulWidget {
+  const ItemPanel({super.key, required this.item_id, required this.loader});
+  final String item_id;
+  final Future<String> Function(String) loader;
+  @override
+  State<ItemPanel> createState() => _ItemPanelState();
+}
+
+class _ItemPanelState extends State<ItemPanel> {
+  late Future<String> _item_future;
+
+  @override
+  void initState() {
+    super.initState();
+    _item_future = widget.loader(widget.item_id);
+  }
+
+  @override
+  void didUpdateWidget(covariant ItemPanel old_widget) {
+    super.didUpdateWidget(old_widget);
+    if (old_widget.item_id != widget.item_id ||
+        old_widget.loader != widget.loader) {
+      _item_future = widget.loader(widget.item_id);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<String>(
+    future: _item_future,
+    builder: (context, snapshot) {
+      if (snapshot.connectionState != ConnectionState.done) {
+        return const Text('조회 중');
+      }
+      if (snapshot.hasError) return const Text('조회 실패');
+      return Text(snapshot.data ?? '내용 없음');
+    },
+  );
+}
+```
+
+`loader`도 바뀌면 다시 조회합니다. 부모가 build마다 새 closure를 만들어 넘기면 이 조건에 걸려 재조회할 수
+있으므로, 예제처럼 동일한 함수 참조를 유지합니다. 인증 계정·언어·조회 조건이 결과에 영향을 준다면
+그 값들도 조회 정체성에 포함해야 합니다. `item_id` 하나만 비교하는 코드를 모든 앱에 그대로 적용하지는 않습니다.
+
+## 입력·요청·화면의 실제 예시
+
+| 사용자 동작 | loader 호출 | 화면 |
+|---|---|---|
+| 최초 `item_a` | `item_a` 1회 | 대기 뒤 a 상세 |
+| 대상 유지 재빌드 | 추가 없음 | 기존 a 상세 |
+| `item_b`로 변경 | `item_b` 1회 | 대기 중 a 내용 숨김 |
+| a 대기 중 b 선택 | a와 b 각각 실행 | 늦은 a가 b를 덮지 않음 |
+
+실제 API가 `GET /items/item_b`에 `200 {"label":"item_b 상세"}`를 반환한다고 가정해도, 경로·상태 코드·필드·
+시간 형식은 그대로입니다. 달라지는 것은 호출 시점과 표시 정책뿐이며 저장값 변경은 없습니다.
+FutureBuilder가 이전 Future의 결과를 현재 snapshot에 반영하지 않는 것과 원래 작업 취소는 다릅니다.
+실제 HTTP 취소·서버 작업 중단은 별도 기능입니다.
+
+## Java 개발자가 자주 하는 오해
+
+Future를 필드에 보관했다고 서버 캐시가 생긴 것은 아닙니다. 이 State가 같은 Future를 재사용할 뿐입니다.
+반대로 모든 재빌드마다 새 Future를 만들면 대상이 그대로여도 조회가 반복될 수 있습니다.
+
+또 `snapshot.hasData`를 맨 먼저 검사하면 대상 변경 중 이전 데이터가 화면에 남을 수 있습니다.
+이것이 항상 버그는 아니지만, 다른 주문·문서의 내용이라면 오인 위험이 있으므로 정책을 명시해야 합니다.
+
+## 연습과 검증 범위
+
+1. 대상 유지 재빌드를 여러 번 누르고 loader 호출이 늘지 않는지 세어 봅니다.
+2. a 응답을 지연시키고 b를 먼저 완료해 b만 남는지 확인합니다.
+3. a 완료 뒤 b로 바꾸고 b 대기 중 a 내용이 사라지는지 확인합니다.
+4. loader 자체를 교체하고 같은 ID에서도 재조회되는지 확인합니다.
+
+독립 임시 프로젝트의 Flutter 3.47.4 / Dart 3.13.3에서 정적 분석과 위젯 테스트 5개를 통과했습니다.
+위 네 경우와 화면 종료 뒤 완료를 확인했습니다. 스네이크케이스를 허용하는 lint 설정만 적용했습니다.
+기준 안정판 3.47.9에서 직접 실행하거나 실제 HTTP 취소·실기기를 검증한 결과는 아닙니다.
+테스트는 비동기 완료 후 프레임이 정착할 때까지 기다리며 특정 builder 호출 횟수를 요구하지 않습니다.
+
+## 참고자료
+
+- [FutureBuilder의 Future 관리와 snapshot 계약](https://api.flutter.dev/flutter/widgets/FutureBuilder-class.html)
+- [State.didUpdateWidget](https://api.flutter.dev/flutter/widgets/State/didUpdateWidget.html)
+- [Flutter SDK archive](https://docs.flutter.dev/install/archive)
+- [이전 학습: debounce와 타이머 해제](/blog/posts/flutter-debounce-timer-lifecycle-2026-11-03/)

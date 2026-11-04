@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /Firefox 159·vcpkg·Grok Bot의 운영 변화/ })
+    .getByRole("link", { name: /단일 loop와 subagent 선택 기준/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/weekly-it-trends-2026-11-03\/$/,
+    /\/blog\/posts\/ai-agent-single-loop-subagent-eval-2026-11-04\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "이번 주 IT 기술 동향: Firefox 159·vcpkg·Grok Bot의 운영 변화",
+    "AI agent 실전: 단일 loop와 subagent 선택 기준",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "브라우저 창과 패키지 블록과 분석 로봇이 연결된 세 가지 기술 동향 일러스트",
+    "하나의 중앙 작업대와 분리된 작은 작업대들이 평가 저울과 체크 지점으로 이어지는 일러스트",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /Firefox 159·vcpkg·Grok Bot의 운영 변화/,
+      name: /단일 loop와 subagent 선택 기준/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /debounce와 타이머 해제/,
+      name: /조회 대상이 바뀌는 FutureBuilder/,
     }),
   ).toBeVisible();
 });
