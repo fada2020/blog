@@ -1,0 +1,126 @@
+---
+title: "Kotlin 27강: 동등성과 배열 비교의 경계"
+description: "Java·Spring Boot 개발자를 위해 ==, ===, contentEquals와 해시 키의 차이를 실행 예제로 비교합니다."
+publishedAt: 2026-11-05T08:30:00+09:00
+draft: false
+category: "Backend"
+tags: ["Kotlin", "Java", "Equality", "Testing", "Collections"]
+kind: "learning"
+heroImage: "../../assets/blog/kotlin-equality-array-boundary-2026-11-05/cover.webp"
+heroImageAlt: "동일한 세 토큰을 담은 별개 트레이가 내용 비교 게이트를 통과하는 일러스트"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 Kotlin 학습"
+lesson: 27
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+> **검증 정보** — 2026년 11월 5일 공식 릴리스 목록과 문서를 확인했습니다. 기준 최신 안정 버전은 Kotlin **2.4.21**입니다. Maven Central의 stdlib 배포 목록도 교차 확인했으며, 최신 표시에 있는 **2.5.0-Beta2**는 사전 공개 버전이므로 기준에서 제외했습니다. 아래 예제는 외부 라이브러리 없는 Kotlin/JVM 코드입니다. Spring·JPA 통합 동작을 실행한 예제는 아닙니다.
+
+## 이번 주 개념
+
+지난 글에서는 backing field로 변경 권한을 좁혔습니다. 이번에는 변경 전후의 값이 “같다”는 말의 의미를 정합니다. DTO 검증이나 캐시 키에서 비교 기준이 어긋나면 실제 내용이 같아도 변경으로 판단하거나, 바뀐 키를 다시 찾지 못할 수 있습니다.
+
+`==`는 모든 객체를 재귀적으로 비교하는 연산자가 아닙니다. 해당 타입의 `equals` 계약에 따라 판단합니다. 배열 내용은 `contentEquals`, 중첩 배열 내용은 `contentDeepEquals`로 의도를 드러냅니다. `===`는 같은 인스턴스인지 확인할 때 사용합니다.
+
+## Java와 Spring에서는 어떻게 다뤘는가
+
+Java에서 `Objects.equals(a, b)`를 쓰더라도 배열 원소를 자동으로 순회하지 않습니다. 배열 내용에는 `Arrays.equals`, 중첩 객체 배열에는 `Arrays.deepEquals`를 선택했습니다. Kotlin에서도 타입을 보고 비교 함수를 선택해야 한다는 점은 같습니다.
+
+| 확인 대상 | Java에서의 선택 | Kotlin에서의 선택 |
+| --- | --- | --- |
+| 객체의 동등성 계약 | `Objects.equals(a, b)` | `a == b` |
+| 동일 인스턴스 | 참조의 `a == b` | `a === b` |
+| 1차원 배열 내용 | `Arrays.equals(a, b)` | `a.contentEquals(b)` |
+| 중첩 배열 내용 | `Arrays.deepEquals(a, b)` | `a.contentDeepEquals(b)` |
+
+API 테스트가 JSON 배열을 비교하는 것과 JVM 객체의 `equals`를 비교하는 것도 다릅니다. JSON assertion이 통과했다고 DTO 자체의 동등성이나 HashMap 키가 검증된 것은 아닙니다.
+
+## Kotlin에서는 무엇이 다른가
+
+`a == b`는 null을 안전하게 처리하며 `equals`를 호출합니다. 일반 클래스가 이를 재정의하지 않았다면 기본 동작은 참조 기준입니다. `data class`는 주 생성자 속성으로 비교 코드를 생성하지만, 클래스 본문의 속성은 기본 비교에 포함하지 않습니다.
+
+배열 속성을 data class에 넣었다고 내용 비교가 자동 보장되지는 않습니다. 바이너리 페이로드를 비교하려면 배열을 직접 비교하거나, 방어적 복사와 `equals`·`hashCode`를 함께 구현한 값 객체를 검토합니다. 단순한 값 목록이라면 배열보다 `List`가 의도를 표현하기 좋습니다.
+
+<Mermaid title="비교 의도에 따른 함수 선택">
+{`flowchart TD
+  Start["무엇이 같은가"] --> Identity["같은 인스턴스: ==="]
+  Start --> Value["타입의 equals 계약: =="]
+  Start --> Array["배열 원소"]
+  Array --> Flat["1차원: contentEquals"]
+  Array --> Nested["중첩: contentDeepEquals"]
+`}
+</Mermaid>
+
+## 최소 실행 예제
+
+다음 코드를 `Equality_demo.kt`로 저장합니다. 변수와 함수 이름은 스네이크케이스로 작성했습니다.
+
+```kotlin
+data class Payload(val bytes: ByteArray)
+data class Snapshot(val values: List<Int>)
+data class Key(var code: Int)
+
+fun main() {
+    val left = byteArrayOf(1, 2, 3)
+    val right = byteArrayOf(1, 2, 3)
+    val alias = left
+    check(left != right)
+    check(left === alias)
+    check(left.contentEquals(right))
+    check(Payload(left) != Payload(right))
+
+    val nested_left = arrayOf(intArrayOf(1, 2))
+    val nested_right = arrayOf(intArrayOf(1, 2))
+    check(!nested_left.contentEquals(nested_right))
+    check(nested_left.contentDeepEquals(nested_right))
+    check(Snapshot(listOf(1, 2)) == Snapshot(listOf(1, 2)))
+
+    val key = Key(7)
+    val original_hash = key.hashCode()
+    key.code = 8
+    check(original_hash != key.hashCode())
+    println("8 equality checks passed")
+}
+```
+
+```bash
+kotlinc Equality_demo.kt -include-runtime -d equality-demo.jar
+java -jar equality-demo.jar
+# 8 equality checks passed
+```
+
+실행 결과 8개 검사를 통과했습니다. 컴파일러는 `left != right`에 배열 참조 비교 경고를 표시했습니다. 이 줄은 내용 비교와의 차이를 의도적으로 재현하므로 유지했습니다.
+
+이 예제는 별개 배열, 별칭, 배열 속성을 가진 data class, 중첩 배열, List 값, 변경 가능한 키의 해시를 확인합니다. 마지막 검사는 HashMap 구현의 특정 버킷 배치를 가정하지 않고 키의 해시 자체가 바뀐다는 사실을 확인합니다.
+
+## 변경 감지와 저장 경계
+
+가상의 요청 `{"values":[1,2]}`를 두 번 역직렬화하면 서로 다른 JVM 배열이 생길 수 있습니다. 배열의 `==`로 변경 여부를 판단하면 같은 내용도 다르다고 판단합니다. 내부 비교를 `contentEquals`로 바꿔도 JSON 필드·상태 코드·시각 의미를 바꿀 이유는 없습니다.
+
+반대로 `contentEquals`가 true라는 이유만으로 DB 쓰기를 무조건 생략해서는 안 됩니다. 다른 필드, 버전, 감사 기록과 트랜잭션 조건이 남아 있을 수 있습니다. JPA 엔티티의 동등성은 생성 ID, 프록시와 생명주기까지 검토해야 하므로 DTO 예제를 그대로 옮기지 않습니다.
+
+## Java 개발자가 자주 하는 오해
+
+- `val` 배열은 원소를 바꿀 수 있습니다. 참조 재할당 금지와 값 불변성은 다릅니다.
+- Kotlin의 읽기 전용 `List` 타입도 모든 별칭의 수정을 막는 깊은 불변성을 보장하지 않습니다. 입력 소유권과 복사를 별도로 설계합니다.
+- 내용 기반 `equals`를 직접 만들면 일관된 `hashCode`도 필요합니다. 배열 내용에는 대응하는 `contentHashCode` 또는 `contentDeepHashCode`를 검토합니다.
+- Map·Set 키로 사용한 값의 비교 대상 속성을 변경하면 조회 계약을 깨뜨릴 수 있습니다. 안정된 값으로 키를 만듭니다.
+
+## 연습 문제
+
+1. `right[0] = 9` 뒤 내용 비교가 false가 되는 검사를 추가합니다.
+2. `Payload`의 입력 배열을 복사하는 값 객체를 만들고, 원본 배열 변경이 내부 상태에 영향을 주지 않는지 확인합니다.
+3. 같은 값 객체 두 개의 `equals`와 `hashCode` 일관성을 검사합니다. 객체를 Map 키로 사용한 뒤에도 내부 값이 바뀌지 않게 합니다.
+
+비교의 단위와 변경 권한을 함께 정하면 “같은 요청”, “같은 객체”, “같은 저장 상태”를 구분할 수 있습니다. 다음 실습에서는 비교 로직을 DTO 매핑 경계에 두고 기존 API 응답이 그대로인지 확인해 봅니다.
+
+## 참고자료
+
+- [Maven Central stdlib metadata](https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/maven-metadata.xml) — 배포 버전과 사전 공개 상태 교차 확인.
+- [Kotlin release process](https://kotlinlang.org/docs/releases.html) — 안정 2.4.21, 2026-11-05 확인.
+- [Kotlin Equality](https://kotlinlang.org/docs/equality.html) — 연산자와 equals·hashCode 계약.
+- [Kotlin Arrays](https://kotlinlang.org/docs/arrays.html) — 배열 비교와 가변성.
+- [Kotlin Data classes](https://kotlinlang.org/docs/data-classes.html) — 생성되는 비교 메서드의 범위.
+- [contentEquals API](https://kotlinlang.org/api/core/kotlin-stdlib/kotlin.collections/content-equals.html) — 표준 라이브러리 비교 함수.

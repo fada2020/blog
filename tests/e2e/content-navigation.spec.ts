@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /단일 loop와 subagent 선택 기준/ })
+    .getByRole("link", { name: /재전송과 중복 답글을 분리하기/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/ai-agent-single-loop-subagent-eval-2026-11-04\/$/,
+    /\/blog\/posts\/webhook-dedup-receipt-retrospective-2026-11-05\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "AI agent 실전: 단일 loop와 subagent 선택 기준",
+    "웹훅 회고: 재전송과 중복 답글을 분리하기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "하나의 중앙 작업대와 분리된 작은 작업대들이 평가 저울과 체크 지점으로 이어지는 일러스트",
+    "반복 도착한 이벤트 봉투 중 하나가 검증 게이트를 지나 단일 답글 카드로 연결되는 일러스트",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /단일 loop와 subagent 선택 기준/,
+      name: /재전송과 중복 답글을 분리하기/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /조회 대상이 바뀌는 FutureBuilder/,
+      name: /동등성과 배열 비교의 경계/,
     }),
   ).toBeVisible();
 });
