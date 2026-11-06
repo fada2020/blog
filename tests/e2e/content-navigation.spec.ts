@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /재전송과 중복 답글을 분리하기/ })
+    .getByRole("link", { name: /26개월 아이와 가을 산책/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/webhook-dedup-receipt-retrospective-2026-11-05\/$/,
+    /\/blog\/posts\/toddler-november-weekend-rhythm-2026-11-06\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "웹훅 회고: 재전송과 중복 답글을 분리하기",
+    "26개월 아이와 가을 산책",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "반복 도착한 이벤트 봉투 중 하나가 검증 게이트를 지나 단일 답글 카드로 연결되는 일러스트",
+    "낙엽이 깔린 가을 산책길과 유모차를 그린 일러스트",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /재전송과 중복 답글을 분리하기/,
+      name: /26개월 아이와 가을 산책/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /동등성과 배열 비교의 경계/,
+      name: /얕은 복사와 스냅샷/,
     }),
   ).toBeVisible();
 });

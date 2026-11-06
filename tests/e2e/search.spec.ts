@@ -9,15 +9,15 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(152);
+  expect(entries).toHaveLength(154);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "웹훅 회고: 재전송과 중복 답글을 분리하기",
+    "26개월 아이와 가을 산책",
   );
   expect(entries[0].href).toBe(
-    "/blog/posts/webhook-dedup-receipt-retrospective-2026-11-05/",
+    "/blog/posts/toddler-november-weekend-rhythm-2026-11-06/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });
