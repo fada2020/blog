@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /26개월 아이와 가을 산책/ })
+    .getByRole("link", { name: /한미 증시의 시차/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/toddler-november-weekend-rhythm-2026-11-06\/$/,
+    /\/blog\/posts\/saturday-market-session-gap-2026-11-07\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "26개월 아이와 가을 산책",
+    "한미 증시의 시차",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "낙엽이 깔린 가을 산책길과 유모차를 그린 일러스트",
+    "지구와 반도체 위로 두 시장의 거래 시간대가 엇갈리는 일러스트",
   );
 });
 
@@ -71,7 +71,7 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /26개월 아이와 가을 산책/,
+      name: /한미 증시의 시차/,
     }),
   ).toBeVisible();
   await expect(
@@ -150,7 +150,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("학습 글");
   await expect(
     page.getByRole("link", {
-      name: /l10n으로 언어와 형식의 경계 세우기/,
+      name: "Kotlin 29강: 분류와 건수 집계",
     }),
   ).toBeVisible();
 
