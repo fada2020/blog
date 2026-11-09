@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /고용 지표와 수정 이력/ })
+    .getByRole("link", { name: /복리에서 빠져나가는 비용/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/sunday-market-data-vintage-2026-11-08\/$/,
+    /\/blog\/posts\/monday-money-compound-fee-drag-2026-11-09\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "고용 지표와 수정 이력",
+    "복리에서 빠져나가는 비용",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "달력과 수정된 지표 장부 옆에 지구와 반도체가 놓인 일러스트",
+    "두 동전 계단 중 한 경로에서 작은 비용이 옆 트레이로 빠져나가는 복리 비교 일러스트",
   );
 });
 
@@ -71,7 +71,7 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /고용 지표와 수정 이력/,
+      name: /복리에서 빠져나가는 비용/,
     }),
   ).toBeVisible();
   await expect(
