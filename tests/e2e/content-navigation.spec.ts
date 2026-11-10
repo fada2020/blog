@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /복리에서 빠져나가는 비용/ })
+    .getByRole("link", { name: /이번 주 IT: 보안과 이전의 경계/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/monday-money-compound-fee-drag-2026-11-09\/$/,
+    /\/blog\/posts\/weekly-it-trends-2026-11-10\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "복리에서 빠져나가는 비용",
+    "이번 주 IT: 보안과 이전의 경계",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "두 동전 계단 중 한 경로에서 작은 비용이 옆 트레이로 빠져나가는 복리 비교 일러스트",
+    "보안 방패와 데이터 이전 다리와 권한 관문이 있는 AI 도구를 연결한 기술 브리핑 일러스트",
   );
 });
 
@@ -71,7 +71,7 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /복리에서 빠져나가는 비용/,
+      name: /이번 주 IT: 보안과 이전의 경계/,
     }),
   ).toBeVisible();
   await expect(
