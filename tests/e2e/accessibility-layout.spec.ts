@@ -137,7 +137,7 @@ test("홈의 주요 링크와 테마 버튼에 키보드 초점이 표시된다"
   await expectKeyboardFocusOutline(page, page.getByRole("link", { name: "Field Notes" }));
   await expectKeyboardFocusOutline(
     page,
-    page.getByRole("link", { name: /이번 주 IT: 보안과 이전의 경계/ }),
+    page.getByRole("link", { name: /AI agent 실전: sandbox의 적용 범위/ }),
   );
   await expectKeyboardFocusOutline(page, page.getByRole("button", { name: "테마 전환" }));
 });
@@ -204,7 +204,7 @@ test("새 시장 학습 글은 모바일에서 광고 슬롯을 포함해 가로
   await page.setViewportSize(viewports[0]);
   await gotoDomReady(
     page,
-    "/blog/posts/weekly-it-trends-2026-11-10/",
+    "/blog/posts/ai-agent-sandbox-scope-2026-11-11/",
   );
 
   const hasHorizontalOverflow = await page.evaluate(
