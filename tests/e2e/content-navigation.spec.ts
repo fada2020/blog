@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /AI agent 실전: sandbox의 적용 범위/ })
+    .getByRole("link", { name: /배포 회고: 완료 기록의 실패/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/ai-agent-sandbox-scope-2026-11-11\/$/,
+    /\/blog\/posts\/deployment-completion-record-retrospective-2026-11-12\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "AI agent 실전: sandbox의 적용 범위",
+    "배포 회고: 완료 기록의 실패",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "에이전트 작업대를 둘러싼 실행 경계와 네트워크 관문 위에 상태 보관 캡슐이 놓인 일러스트",
+    "배포 모듈이 도킹한 자리 옆에서 별도 완료 기록을 대조하는 일러스트",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /AI agent 실전: sandbox의 적용 범위/,
+      name: /배포 회고: 완료 기록의 실패/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Flutter 34강: 목록의 식별과 상태/,
+      name: /Kotlin 30강: getOrPut과 동시성/,
     }),
   ).toBeVisible();
 });
@@ -150,7 +150,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("학습 글");
   await expect(
     page.getByRole("link", {
-      name: "Kotlin 29강: 분류와 건수 집계",
+      name: "Kotlin 30강: getOrPut과 동시성",
     }),
   ).toBeVisible();
 
@@ -158,7 +158,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page).toHaveURL(/\/blog\/kinds\/learning\/page\/2\/$/);
   await expect(
     page.getByRole("link", {
-      name: "Spring Boot 개발자를 위한 Kotlin 스물세째 걸음: 취소 뒤 정리 경계 세우기",
+      name: "Spring Boot 개발자를 위한 Kotlin 스물네째 걸음: sealed 오류를 HTTP 경계에서 끝내기",
     }),
   ).toBeVisible();
 });

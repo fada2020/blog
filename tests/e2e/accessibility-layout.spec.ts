@@ -137,7 +137,7 @@ test("홈의 주요 링크와 테마 버튼에 키보드 초점이 표시된다"
   await expectKeyboardFocusOutline(page, page.getByRole("link", { name: "Field Notes" }));
   await expectKeyboardFocusOutline(
     page,
-    page.getByRole("link", { name: /AI agent 실전: sandbox의 적용 범위/ }),
+    page.getByRole("link", { name: /배포 회고: 완료 기록의 실패/ }),
   );
   await expectKeyboardFocusOutline(page, page.getByRole("button", { name: "테마 전환" }));
 });
@@ -200,11 +200,11 @@ test("긴 글 콘텐츠와 Mermaid가 모바일 본문을 넘지 않는다", asy
   expect(overflowingElements).toEqual([]);
 });
 
-test("새 시장 학습 글은 모바일에서 광고 슬롯을 포함해 가로로 넘치지 않는다", async ({ page }) => {
+test("새 실무 회고 글은 모바일에서 광고 슬롯을 포함해 가로로 넘치지 않는다", async ({ page }) => {
   await page.setViewportSize(viewports[0]);
   await gotoDomReady(
     page,
-    "/blog/posts/ai-agent-sandbox-scope-2026-11-11/",
+    "/blog/posts/deployment-completion-record-retrospective-2026-11-12/",
   );
 
   const hasHorizontalOverflow = await page.evaluate(
