@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /배포 회고: 완료 기록의 실패/ })
+    .getByRole("link", { name: /두 돌 아이와 주말 공원 산책/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/deployment-completion-record-retrospective-2026-11-12\/$/,
+    /\/blog\/posts\/toddler-autumn-park-weekend-2026-11-13\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "배포 회고: 완료 기록의 실패",
+    "두 돌 아이와 주말 공원 산책",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "배포 모듈이 도킹한 자리 옆에서 별도 완료 기록을 대조하는 일러스트",
+    "가을 공원 벤치 위 작은 장화와 은행잎 일러스트",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /배포 회고: 완료 기록의 실패/,
+      name: /두 돌 아이와 주말 공원 산책/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Kotlin 30강: getOrPut과 동시성/,
+      name: /Kotlin 31강: associateBy와 중복 키/,
     }),
   ).toBeVisible();
 });
@@ -158,7 +158,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page).toHaveURL(/\/blog\/kinds\/learning\/page\/2\/$/);
   await expect(
     page.getByRole("link", {
-      name: "Spring Boot 개발자를 위한 Kotlin 스물네째 걸음: sealed 오류를 HTTP 경계에서 끝내기",
+      name: "Spring Boot 개발자를 위한 Flutter 서른한째 걸음: debounce와 타이머 해제",
     }),
   ).toBeVisible();
 });
