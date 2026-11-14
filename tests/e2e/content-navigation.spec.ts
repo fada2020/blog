@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /두 돌 아이와 주말 공원 산책/ })
+    .getByRole("link", { name: /미국 물가와 한국 수출 읽기/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/toddler-autumn-park-weekend-2026-11-13\/$/,
+    /\/blog\/posts\/saturday-market-oil-cpi-2026-11-14\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "두 돌 아이와 주말 공원 산책",
+    "미국 물가와 한국 수출 읽기",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "가을 공원 벤치 위 작은 장화와 은행잎 일러스트",
+    "원유 배럴과 해상 운송로, 반도체 웨이퍼 일러스트",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /두 돌 아이와 주말 공원 산책/,
+      name: /미국 물가와 한국 수출 읽기/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Kotlin 31강: associateBy와 중복 키/,
+      name: /Kotlin 32강: zip과 목록 길이/,
     }),
   ).toBeVisible();
 });

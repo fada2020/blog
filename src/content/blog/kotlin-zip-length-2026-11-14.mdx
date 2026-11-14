@@ -1,0 +1,53 @@
+---
+title: "Kotlin 32강: zip과 목록 길이"
+description: "위치로 짝을 짓는 zip에서 남는 원소와 검증 경계를 다룹니다."
+publishedAt: 2026-11-14T08:30:00+09:00
+draft: false
+category: "Backend"
+tags: ["Kotlin", "Java", "Collections"]
+kind: "learning"
+heroImage: "../../assets/blog/kotlin-zip-length-2026-11-14/cover.webp"
+heroImageAlt: "두 줄의 토큰에서 짝을 찾지 못한 토큰 하나가 남는 일러스트"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 Kotlin 학습"
+lesson: 32
+---
+
+Spring Boot의 배치 서비스에서 요청 항목과 처리 결과를 한 줄씩 묶는다고 가정합니다. 결과 하나가 빠졌는데도 저장이 성공하면 빠진 항목이 어디인지 알아내기 어렵습니다. 두 목록을 묶기 전에 위치가 서로 대응한다는 계약부터 확인합니다.
+
+2026년 11월 14일 기준 Kotlin 최신 안정 버전 2.4.21의 표준 라이브러리 계약을 확인했습니다. [공식 릴리스](https://github.com/JetBrains/kotlin/releases/tag/v2.4.21), [zip API](https://kotlinlang.org/api/core/kotlin-stdlib/kotlin.collections/zip.html)
+
+## 짧은 목록에서 끝나는 zip
+
+`zip`은 두 목록의 같은 위치에 있는 원소를 묶습니다. 결과 길이는 두 입력 중 짧은 쪽의 길이입니다. 변환 함수를 넘기는 오버로드를 쓰면 결과를 곧바로 원하는 타입으로 만들 수 있습니다.
+
+```kotlin
+data class Row(val id: String, val status: String)
+
+fun pair_rows(ids: List<String>, statuses: List<String>): List<Row> {
+    require(ids.size == statuses.size) {
+        "Expected one result per ID: ids=${ids.size}, statuses=${statuses.size}"
+    }
+    return ids.zip(statuses, ::Row)
+}
+
+fun main() {
+    val ids = listOf("A", "B")
+    check(ids.zip(listOf("OK")) == listOf("A" to "OK"))
+    check(pair_rows(ids, listOf("OK", "RETRY")) ==
+        listOf(Row("A", "OK"), Row("B", "RETRY")))
+    check(pair_rows(emptyList(), emptyList()).isEmpty())
+    check(runCatching { pair_rows(ids, listOf("OK")) }
+        .exceptionOrNull() is IllegalArgumentException)
+    println("4 checks passed")
+}
+```
+
+길이 검사는 저장 전에 수행합니다. 입력 형식 오류로 분류할지 외부 서비스 응답 오류로 분류할지는 목록을 만든 주체에 따라 정합니다. 예를 들어 클라이언트 입력에서 길이가 다르면 해당 API의 입력 오류 규칙으로 처리하고, 내부 배치에서 결과 개수가 다르면 실패한 배치를 기록합니다.
+
+## 응답 순서를 보장할 수 없는 경우
+
+`[A, B]`와 `[(B, OK), (A, RETRY)]`는 길이가 같습니다. 두 번째 목록의 ID를 버리고 상태만 묶으면 페어링이 뒤집힙니다. 응답이 재정렬되거나 일부만 도착할 수 있다면 ID를 포함한 결과를 받아 ID별로 대응시키고, 필요한 ID의 누락과 중복을 검사합니다.
+
+Java에서 두 목록을 인덱스로 순회하며 짝을 짓던 코드를 옮길 때도 같은 기준을 적용할 수 있습니다. 공통 구간만 필요한 화면 목록은 `zip`을 바로 쓸 수 있습니다. 일대일 배치 결과에는 길이 검사를 붙이고, 순서를 보장할 수 없는 API에는 키 기반 검증을 적용합니다.
