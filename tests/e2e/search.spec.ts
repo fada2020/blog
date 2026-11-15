@@ -9,15 +9,15 @@ test("검색 인덱스는 공개 글의 여섯 필드만 포함한다", async ({
   expect(response.ok()).toBe(true);
 
   const entries = await response.json();
-  expect(entries).toHaveLength(170);
+  expect(entries).toHaveLength(172);
   expect(Object.keys(entries[0]).sort()).toEqual(
     ["category", "description", "href", "publishedAt", "tags", "title"].sort(),
   );
   expect(entries[0].title).toBe(
-    "미국 물가와 한국 수출 읽기",
+    "한미 종가와 생산자물가",
   );
   expect(entries[0].href).toBe(
-    "/blog/posts/saturday-market-oil-cpi-2026-11-14/",
+    "/blog/posts/sunday-market-ppi-closes-2026-11-15/",
   );
   expect(JSON.stringify(entries)).not.toContain("작성 중인 배포 점검 메모");
 });

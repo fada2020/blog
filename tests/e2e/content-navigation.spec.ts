@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /미국 물가와 한국 수출 읽기/ })
+    .getByRole("link", { name: /한미 종가와 생산자물가/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/saturday-market-oil-cpi-2026-11-14\/$/,
+    /\/blog\/posts\/sunday-market-ppi-closes-2026-11-15\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "미국 물가와 한국 수출 읽기",
+    "한미 종가와 생산자물가",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "원유 배럴과 해상 운송로, 반도체 웨이퍼 일러스트",
+    "서로 다른 시간을 가리키는 시계와 반도체 웨이퍼 일러스트",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /미국 물가와 한국 수출 읽기/,
+      name: /한미 종가와 생산자물가/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Kotlin 32강: zip과 목록 길이/,
+      name: /Kotlin 심화: zip과 데이터 계약/,
     }),
   ).toBeVisible();
 });
