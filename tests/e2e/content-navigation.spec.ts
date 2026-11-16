@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /한미 종가와 생산자물가/ })
+    .getByRole("link", { name: /월급 전 현금흐름/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/sunday-market-ppi-closes-2026-11-15\/$/,
+    /\/blog\/posts\/monday-money-payday-cash-flow-2026-11-16\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "한미 종가와 생산자물가",
+    "월급 전 현금흐름",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "서로 다른 시간을 가리키는 시계와 반도체 웨이퍼 일러스트",
+    "급여일 달력 옆에 높이가 다른 동전이 놓인 일러스트",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /한미 종가와 생산자물가/,
+      name: /월급 전 현금흐름/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Kotlin 심화: zip과 데이터 계약/,
+      name: /Flutter 36강: 스크롤 위치 기억/,
     }),
   ).toBeVisible();
 });

@@ -137,7 +137,7 @@ test("홈의 주요 링크와 테마 버튼에 키보드 초점이 표시된다"
   await expectKeyboardFocusOutline(page, page.getByRole("link", { name: "Field Notes" }));
   await expectKeyboardFocusOutline(
     page,
-    page.getByRole("link", { name: /한미 종가와 생산자물가/ }),
+    page.getByRole("link", { name: /월급 전 현금흐름/ }),
   );
   await expectKeyboardFocusOutline(page, page.getByRole("button", { name: "테마 전환" }));
 });
@@ -200,11 +200,11 @@ test("긴 글 콘텐츠와 Mermaid가 모바일 본문을 넘지 않는다", asy
   expect(overflowingElements).toEqual([]);
 });
 
-test("새 주식 학습 글은 모바일에서 광고 슬롯을 포함해 가로로 넘치지 않는다", async ({ page }) => {
+test("새 경제 학습 글은 모바일에서 광고 슬롯을 포함해 가로로 넘치지 않는다", async ({ page }) => {
   await page.setViewportSize(viewports[0]);
   await gotoDomReady(
     page,
-    "/blog/posts/sunday-market-ppi-closes-2026-11-15/",
+    "/blog/posts/monday-money-payday-cash-flow-2026-11-16/",
   );
 
   const hasHorizontalOverflow = await page.evaluate(

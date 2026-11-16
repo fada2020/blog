@@ -1,0 +1,97 @@
+---
+title: "Flutter 36강: 스크롤 위치 기억"
+description: "탭의 목록을 다시 만들 때 PageStorageKey와 ScrollController가 목록별 스크롤 위치를 찾는 과정을 실습합니다."
+publishedAt: 2026-11-16T08:30:00+09:00
+draft: false
+category: "Frontend"
+tags: ["Flutter", "Dart", "Spring Boot", "State"]
+kind: "learning"
+heroImage: "../../assets/blog/flutter-page-storage-scroll-2026-11-16/cover.webp"
+heroImageAlt: "서로 다른 높이의 스크롤 표시가 있는 두 목록 화면 일러스트"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 모바일 앱 학습"
+lesson: 36
+---
+
+> **공식 문서 확인: 2026년 11월 16일 KST · Flutter 안정판 3.50.0**
+>
+> Flutter 공식 저장소의 stable 브랜치와 3.50.0 태그가 같은 커밋을 가리키는 것을 확인했습니다.
+
+## 탭마다 읽던 위치를 기억하기
+
+뉴스를 아래로 내리다가 저장 목록으로 이동합니다. 다시 뉴스로 돌아오면 방금 보던 곳을 보여주고 싶습니다. 탭을 바꿀 때 화면에서 목록을 제거하는 구현이라면 새 목록이 이전 위치를 찾아야 합니다.
+
+Spring 개발자에게 익숙한 세션 저장소처럼, 여기에도 **값을 저장할 범위와 조회에 쓸 키**가 있습니다. Flutter에서 그 범위는 위젯 트리의 `PageStorage`이고, 목록의 식별자는 `PageStorageKey`입니다. 라우트는 보통 자체 `PageStorage`를 제공합니다.
+
+## 목록별 키를 붙입니다
+
+다음 예제의 탭 전환은 라우트를 유지하면서 본문의 목록을 교체합니다. `ListView`가 만드는 기본 스크롤 컨트롤러의 `keepScrollOffset`은 기본값이 `true`입니다.
+
+```dart
+import 'package:flutter/material.dart';
+
+void main() => runApp(const MaterialApp(home: FeedPage()));
+
+class FeedPage extends StatefulWidget {
+  const FeedPage({super.key});
+
+  @override
+  State<FeedPage> createState() => _FeedPageState();
+}
+
+class _FeedPageState extends State<FeedPage> {
+  int selected_tab = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final feed_id = selected_tab == 0 ? 'news' : 'saved';
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Feeds')),
+      body: ListView.builder(
+        key: PageStorageKey<String>(feed_id),
+        itemCount: 100,
+        itemExtent: 56,
+        itemBuilder: (context, index) => ListTile(
+          title: Text('$feed_id $index'),
+        ),
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: selected_tab,
+        onDestinationSelected: (index) {
+          setState(() => selected_tab = index);
+        },
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.article), label: 'News'),
+          NavigationDestination(icon: Icon(Icons.bookmark), label: 'Saved'),
+        ],
+      ),
+    );
+  }
+}
+```
+
+1. News를 여러 항목 내려 읽고 스크롤이 멈출 때까지 기다립니다.
+2. Saved로 전환합니다. 처음 여는 목록은 기본 위치에서 시작합니다.
+3. Saved도 스크롤한 뒤 News로 돌아갑니다. News가 저장한 위치가 복원됩니다.
+4. Saved로 다시 이동해 별도의 위치가 복원되는지 봅니다.
+
+## 저장 범위와 키를 확인합니다
+
+| 조건 | 결과 |
+| --- | --- |
+| 같은 저장소와 같은 키로 목록을 다시 생성 | 저장된 오프셋을 복원 |
+| 같은 저장소에서 두 목록이 같은 저장 경로를 사용 | 두 목록의 오프셋이 같은 위치에 기록될 수 있음 |
+| 새 컨트롤러에서 `keepScrollOffset: false` | 저장된 오프셋 복원 없이 컨트롤러의 초기 오프셋 사용 |
+| 라우트를 닫아 해당 저장소가 폐기됨 | 새 라우트에서 이전 버킷의 값을 복원할 수 없음 |
+
+키에는 재생성 후에도 동일한 피드 ID를 사용합니다. 계정을 바꾸거나 필터 변경 시 스크롤을 처음부터 시작해야 한다면 계정이나 필터도 키의 안정적인 구성 요소로 넣을 수 있습니다. 데이터 순서가 바뀌면 같은 픽셀 위치에서 다른 행이 보일 수 있습니다. 읽던 항목까지 복원하는 기능에는 항목 ID와 그 항목 내 위치를 별도로 기록하는 설계가 필요합니다.
+
+위젯이 아예 제거되지 않는 탭 구조에서는 살아 있는 스크롤 상태가 위치를 유지할 수 있습니다. 앱 종료 후 복원까지 필요한 화면이라면 Flutter의 상태 복원 API와 목록 데이터 준비 시점을 함께 확인합니다.
+
+## 공식 자료
+
+- [Flutter SDK 아카이브](https://docs.flutter.dev/install/archive) · [Flutter 3.50.0 태그](https://github.com/flutter/flutter/tree/3.50.0)
+- [PageStorage API](https://api.flutter.dev/flutter/widgets/PageStorage-class.html) · [PageStorageKey API](https://api.flutter.dev/flutter/widgets/PageStorageKey-class.html)
+- [ScrollController.keepScrollOffset](https://api.flutter.dev/flutter/widgets/ScrollController/keepScrollOffset.html)
