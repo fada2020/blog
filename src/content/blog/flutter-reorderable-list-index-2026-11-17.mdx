@@ -1,0 +1,97 @@
+---
+title: "Flutter 37강: 목록 순서 바꾸기"
+description: "ReorderableListView에서 항목의 ID와 위치를 구분하고 onReorderItem으로 드래그 결과를 반영합니다."
+publishedAt: 2026-11-17T08:30:00+09:00
+draft: false
+category: "Frontend"
+tags: ["Flutter", "Dart", "Spring Boot", "State"]
+kind: "learning"
+heroImage: "../../assets/blog/flutter-reorderable-list-index-2026-11-17/cover.webp"
+heroImageAlt: "목록에서 파란 카드를 집어 다른 위치로 옮기는 일러스트"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 모바일 앱 학습"
+lesson: 37
+---
+
+> **공식 문서 확인 · 2026년 11월 17일 KST · Flutter 안정판 3.50.0**
+
+## 항목의 ID와 목록 안의 위치
+
+할 일 세 개가 `[A, B, C]` 순서로 있습니다. A를 맨 아래로 옮기면 목록은 `[B, C, A]`가 되고, A가 완료 상태였다면 그 상태도 함께 이동해야 합니다.
+
+Spring 개발자에게 익숙한 테이블로 생각하면 항목의 ID는 기본 키에, 현재 위치는 정렬 컬럼에 해당합니다. Flutter에서도 `ValueKey(item.id)`처럼 이동 후에도 같은 값을 유지하는 키를 씁니다. 위치를 키로 사용하면 이름과 입력값, 체크 상태처럼 항목에 속한 데이터가 드래그 후 다른 행과 연결될 수 있습니다.
+
+## 드래그 순서를 화면에 반영하기
+
+`onReorderItem`은 원래 위치와 **항목을 제거한 뒤의 삽입 위치**를 받습니다. 두 번째 인덱스를 그대로 `insert`에 전달합니다. 예전 `onReorder`의 코드를 옮길 때 아래로 이동하는 경우에 적용하던 인덱스 감소를 제거해야 합니다.
+
+```dart
+import 'package:flutter/material.dart';
+
+void main() => runApp(const MaterialApp(home: TaskPage()));
+
+class TaskPage extends StatefulWidget {
+  const TaskPage({super.key});
+
+  @override
+  State<TaskPage> createState() => _TaskPageState();
+}
+
+class _TaskPageState extends State<TaskPage> {
+  final tasks = [
+    (id: 'a', label: '요구사항 읽기'),
+    (id: 'b', label: '예제 작성'),
+    (id: 'c', label: '결과 확인'),
+  ];
+  final completed = <String>{};
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('오늘 할 일')),
+      body: ReorderableListView.builder(
+        itemCount: tasks.length,
+        onReorderItem: (old_index, new_index) {
+          setState(() {
+            final moved = tasks.removeAt(old_index);
+            tasks.insert(new_index, moved);
+          });
+        },
+        itemBuilder: (context, index) {
+          final task = tasks[index];
+          return CheckboxListTile(
+            key: ValueKey(task.id),
+            title: Text(task.label),
+            value: completed.contains(task.id),
+            onChanged: (checked) {
+              setState(() {
+                if (checked == true) {
+                  completed.add(task.id);
+                } else {
+                  completed.remove(task.id);
+                }
+              });
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+```
+
+| 이동 | 콜백 위치 | 결과 |
+|---|---|---|
+| A를 맨 아래로 | `(0, 2)` | `[B, C, A]` |
+| C를 맨 위로 | `(2, 0)` | `[C, A, B]` |
+
+각 행은 원래 목록 `[A, B, C]`에서 시작합니다. 모바일의 기본 동작은 항목 길게 누르기이고, 데스크톱에서는 기본 드래그 핸들을 집습니다.
+
+## 실습
+
+1. 첫 항목을 체크하고 맨 아래로 옮깁니다. 체크가 같은 할 일에 붙어 있는지 확인합니다.
+2. 다시 맨 위로 옮깁니다. 위·아래 이동을 모두 확인하면 인덱스 보정을 두 번 적용하는 실수를 잡을 수 있습니다.
+3. 서버 저장 기능을 추가한다면 현재 정렬 순서를 ID 배열 `["b", "c", "a"]`로 표현해 봅니다. 서버에서는 기존 항목의 누락이나 중복을 검증할 수 있습니다. 위 예제의 정렬 순서와 체크 상태는 화면 메모리에만 있습니다.
+
+[Flutter 3.50 릴리스 노트](https://docs.flutter.dev/release/release-notes) · [ReorderableListView API](https://api.flutter.dev/flutter/material/ReorderableListView-class.html) · [onReorderItem API](https://api.flutter.dev/flutter/material/ReorderableListView/onReorderItem.html)

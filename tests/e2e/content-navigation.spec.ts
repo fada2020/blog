@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /월급 전 현금흐름/ })
+    .getByRole("link", { name: /이번 주 IT: 릴리스와 도입 판단/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/monday-money-payday-cash-flow-2026-11-16\/$/,
+    /\/blog\/posts\/weekly-it-trends-2026-11-17\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "월급 전 현금흐름",
+    "이번 주 IT: 릴리스와 도입 판단",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "급여일 달력 옆에 높이가 다른 동전이 놓인 일러스트",
+    "런타임, 브라우저, 데이터베이스와 AI 분기점을 나타낸 기술 브리핑 일러스트",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /월급 전 현금흐름/,
+      name: /이번 주 IT: 릴리스와 도입 판단/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Flutter 36강: 스크롤 위치 기억/,
+      name: /Flutter 37강: 목록 순서 바꾸기/,
     }),
   ).toBeVisible();
 });
@@ -111,14 +111,14 @@ test("카테고리와 태그로 공개 글을 탐색할 수 있다", async ({ pa
   await expect(page).toHaveURL(/\/blog\/categories\/Frontend\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Frontend 글");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스물일곱째 걸음/ }),
+    page.getByRole("link", { name: /Flutter 37강: 목록 순서 바꾸기/ }),
   ).toBeVisible();
 
   await page.getByRole("link", { name: "#Flutter", exact: true }).first().click();
   await expect(page).toHaveURL(/\/blog\/tags\/Flutter\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("#Flutter");
   await expect(
-    page.getByRole("link", { name: /Spring Boot 개발자를 위한 Flutter 스물일곱째 걸음/ }),
+    page.getByRole("link", { name: /Flutter 37강: 목록 순서 바꾸기/ }),
   ).toBeVisible();
 });
 
