@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /이번 주 IT: 릴리스와 도입 판단/ })
+    .getByRole("link", { name: /AI agent: 성공당 비용/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/weekly-it-trends-2026-11-17\/$/,
+    /\/blog\/posts\/ai-agent-cost-harness-2026-11-18\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "이번 주 IT: 릴리스와 도입 판단",
+    "AI agent: 성공당 비용",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "런타임, 브라우저, 데이터베이스와 AI 분기점을 나타낸 기술 브리핑 일러스트",
+    "서로 다른 에이전트 경로가 같은 검증 관문과 비용 저울로 모이는 일러스트",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /이번 주 IT: 릴리스와 도입 판단/,
+      name: /AI agent: 성공당 비용/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Flutter 37강: 목록 순서 바꾸기/,
+      name: /Flutter 38강: 밀어서 삭제하기/,
     }),
   ).toBeVisible();
 });
@@ -111,14 +111,14 @@ test("카테고리와 태그로 공개 글을 탐색할 수 있다", async ({ pa
   await expect(page).toHaveURL(/\/blog\/categories\/Frontend\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Frontend 글");
   await expect(
-    page.getByRole("link", { name: /Flutter 37강: 목록 순서 바꾸기/ }),
+    page.getByRole("link", { name: /Flutter 38강: 밀어서 삭제하기/ }),
   ).toBeVisible();
 
   await page.getByRole("link", { name: "#Flutter", exact: true }).first().click();
   await expect(page).toHaveURL(/\/blog\/tags\/Flutter\/$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("#Flutter");
   await expect(
-    page.getByRole("link", { name: /Flutter 37강: 목록 순서 바꾸기/ }),
+    page.getByRole("link", { name: /Flutter 38강: 밀어서 삭제하기/ }),
   ).toBeVisible();
 });
 
