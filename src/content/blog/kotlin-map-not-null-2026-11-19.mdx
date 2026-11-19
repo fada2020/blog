@@ -1,0 +1,88 @@
+---
+title: "Kotlin 33강: 누락 값 다루기"
+description: "mapNotNull의 null 제외와 입력 검증의 실패 보존을 구분합니다."
+publishedAt: 2026-11-19T08:30:00+09:00
+draft: false
+category: "Backend"
+tags: ["Kotlin", "Java", "Collections"]
+kind: "learning"
+heroImage: "../../assets/blog/kotlin-map-not-null-2026-11-19/cover.webp"
+heroImageAlt: "세 입력 카드 중 빈 카드가 필터 옆에 남고 두 카드가 통과하는 일러스트"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 Kotlin 학습"
+lesson: 33
+---
+
+## 이번 주 개념
+
+`mapNotNull`은 변환 결과가 null인 원소를 결과 목록에서 제외합니다. 코드는 짧아지지만 입력과 출력의 개수가 달라질 수 있습니다. Spring Boot에서 일괄 등록 요청을 처리할 때 이 차이를 놓치면 잘못된 입력을 성공한 일부 목록으로 바꾸게 됩니다.
+
+> 검증일: 2026년 11월 19일 KST. 기준은 최신 안정판 Kotlin 2.4.21입니다. EAP는 기준에서 제외했습니다.
+
+[공식 릴리스 이력](https://kotlinlang.org/docs/releases.html)과 [Gradle 플러그인 2.4.21](https://plugins.gradle.org/plugin/org.jetbrains.kotlin.jvm/2.4.21)에서 버전을 교차 확인했습니다.
+
+## Java 개발자가 읽는 변환 단계
+
+Java Stream에서 문자열을 숫자로 바꾼 뒤 null을 필터링하는 흐름과 비슷합니다. 다만 `Integer.parseInt`는 실패 시 예외를 던지고, Kotlin의 `toIntOrNull`은 null을 반환합니다. `mapNotNull` 자체가 예외를 잡아 주는 것은 아닙니다.
+
+| 목적 | 선택 | 남는 정보 |
+|---|---|---|
+| 표시 가능한 값만 선택 | mapNotNull | 성공 값 |
+| 모든 입력 검증 | map으로 판정 보존 | 위치와 성공 여부 |
+| 전체 성공 후 저장 | 검증 후 저장 | 실패 시 저장 안 함 |
+
+검색 제안에서 표시 가능한 숫자만 모으는 것과 주문 수량을 검증하는 것은 다른 계약입니다. 전자에는 제외가 자연스럽지만 후자는 실패한 위치를 알려야 할 수 있습니다.
+
+## 최소 실행 예제
+
+아래 코드는 HTTP 처리기가 아닌 독립 Kotlin/JVM 예제입니다. 허용 범위는 학습용으로 1~100을 정했습니다.
+
+```kotlin
+data class Parsed(val index: Int, val value: Int?)
+
+fun parse_rows(inputs: List<String>): List<Parsed> =
+    inputs.mapIndexed { index, input ->
+        Parsed(index, input.toIntOrNull()?.takeIf { it in 1..100 })
+    }
+
+fun validated_values(inputs: List<String>): List<Int> {
+    val rows = parse_rows(inputs)
+    require(rows.all { it.value != null }) { "Invalid quantity" }
+    return rows.map { requireNotNull(it.value) }
+}
+
+fun main() {
+    val inputs = listOf("2", "oops", "0", "5")
+    check(inputs.mapNotNull { it.toIntOrNull() } == listOf(2, 0, 5))
+    check(parse_rows(inputs).filter { it.value == null }
+        .map { it.index } == listOf(1, 2))
+    check(runCatching { validated_values(inputs) }.isFailure)
+    check(validated_values(listOf("2", "5")) == listOf(2, 5))
+    check(validated_values(emptyList()).isEmpty())
+    check(runCatching {
+        listOf("1").mapNotNull { error("boom") }
+    }.isFailure)
+    println("6 checks passed")
+}
+```
+
+`toIntOrNull`은 숫자 변환만 판단합니다. 0도 정수이므로 별도의 범위 검사 없이는 성공합니다. 빈 목록을 거부하는 계약이라면 `require(inputs.isNotEmpty())`를 추가해야 합니다. 현재 예제는 빈 목록을 허용합니다.
+
+## 입력과 응답의 의미를 먼저 고정합니다
+
+학습용 요청을 `{"quantities":["2","oops","0","5"]}`로 가정하면 실패 위치는 0부터 세어 `[1,2]`입니다. 전체 성공 계약이라면 저장 전에 실패를 반환하고 저장 건수는 0입니다. 일부 성공 계약이라면 각 위치의 성공·실패를 모두 응답해야 합니다. 이는 제안 예시이며 특정 서비스의 실제 API 계약이 아닙니다. 기존 서비스에 적용할 때는 상태 코드와 오류 JSON을 유지해야 합니다.
+
+성공 값만 남긴 뒤 원래 입력과 zip으로 묶으면 위치가 어긋납니다. 앞선 zip 학습처럼 개수가 같은지뿐 아니라 각 결과가 어느 입력에서 왔는지 보존해야 합니다.
+
+Kotlin/JVM 2.4.21과 JDK 21에서 위 예제를 컴파일하고 6개 check가 통과하는 것을 확인했습니다. HTTP 처리기나 실제 데이터 저장은 실행하지 않았습니다.
+
+## 자주 하는 오해와 연습
+
+null을 제외하면 입력이 유효해지는 것은 아닙니다. 예외도 자동으로 사라지지 않습니다. null이 ‘선택 대상 아님’인지 ‘처리 실패’인지 먼저 결정합니다.
+
+1. 입력에 `"2147483648"`을 넣고 정수 범위 초과가 어떻게 남는지 확인합니다.
+2. 빈 목록을 허용하지 않는 함수를 별도로 만들고 기존 예제와 계약을 비교합니다.
+3. 저장 함수를 카운터로 대체하고 실패 입력에서는 호출 횟수가 0인지 검사합니다.
+
+[컬렉션 변환 공식 문서](https://kotlinlang.org/docs/collection-transformations.html), [mapNotNull API](https://kotlinlang.org/api/core/kotlin-stdlib/kotlin.collections/map-not-null.html), [toIntOrNull API](https://kotlinlang.org/api/core/kotlin-stdlib/kotlin.text/to-int-or-null.html)를 기준으로 변환과 검증을 구분했습니다.

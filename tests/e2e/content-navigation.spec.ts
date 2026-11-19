@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /AI agent: 성공당 비용/ })
+    .getByRole("link", { name: /수집 성공과 알림 도착/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/ai-agent-cost-harness-2026-11-18\/$/,
+    /\/blog\/posts\/telemetry-delivery-retrospective-2026-11-19\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "AI agent: 성공당 비용",
+    "수집 성공과 알림 도착",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "서로 다른 에이전트 경로가 같은 검증 관문과 비용 저울로 모이는 일러스트",
+    "로그 수집기와 경보 종과 수신함이 각각 별도 관문으로 연결된 일러스트",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /AI agent: 성공당 비용/,
+      name: /수집 성공과 알림 도착/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Flutter 38강: 밀어서 삭제하기/,
+      name: /Kotlin 33강: 누락 값 다루기/,
     }),
   ).toBeVisible();
 });
