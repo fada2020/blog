@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /수집 성공과 알림 도착/ })
+    .getByRole("link", { name: /두 돌 아이의 실내 주말/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/telemetry-delivery-retrospective-2026-11-19\/$/,
+    /\/blog\/posts\/toddler-indoor-weekend-2026-11-20\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "수집 성공과 알림 도착",
+    "두 돌 아이의 실내 주말",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "로그 수집기와 경보 종과 수신함이 각각 별도 관문으로 연결된 일러스트",
+    "블록과 그림책과 작은 신발이 놓인 따뜻한 실내 놀이 공간 일러스트",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /수집 성공과 알림 도착/,
+      name: /두 돌 아이의 실내 주말/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Kotlin 33강: 누락 값 다루기/,
+      name: /Kotlin 34강: 묶음 처리의 경계/,
     }),
   ).toBeVisible();
 });
