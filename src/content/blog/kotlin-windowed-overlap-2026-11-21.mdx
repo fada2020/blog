@@ -1,0 +1,84 @@
+---
+title: "Kotlin 35강: 겹치는 구간 읽기"
+description: "windowed의 크기·간격·마지막 구간을 실행 예제로 확인하고 배치 처리와 이동 평균을 구분합니다."
+publishedAt: 2026-11-21T08:30:00+09:00
+draft: false
+category: "Backend"
+tags: ["Kotlin", "Java", "Collections"]
+kind: "learning"
+heroImage: "../../assets/blog/kotlin-windowed-overlap-2026-11-21/cover.webp"
+heroImageAlt: "다섯 데이터 타일 위로 세 칸짜리 창 두 개가 겹쳐 이동하는 일러스트"
+imageCredit:
+  label: "직접 생성 이미지"
+series: "Spring 개발자의 Kotlin 학습"
+lesson: 35
+---
+
+## 이번 주 개념
+
+`windowed(3)`는 연속된 세 원소를 읽는 창을 한 칸씩 옮깁니다. `[1,2,3,4,5]`에서는 `[[1,2,3],[2,3,4],[3,4,5]]`가 나옵니다. 한 원소가 여러 구간에 포함되므로 각 구간을 저장 요청으로 바꾸면 같은 원소를 반복 처리할 수 있습니다.
+
+> 검증일: 2026년 11월 21일 KST. 최신 안정판 Kotlin 2.4.21 기준입니다. Gradle 포털의 latest 표시는 2.5.0-RC이므로 안정판에서 제외했습니다.
+
+[공식 릴리스 이력](https://kotlinlang.org/docs/releases.html), [Gradle 플러그인 목록](https://plugins.gradle.org/plugin/org.jetbrains.kotlin.jvm), [windowed API](https://kotlinlang.org/api/core/kotlin-stdlib/kotlin.collections/windowed.html)를 대조했습니다.
+
+## Java와 Spring에서는 어떻게 다뤘는가
+
+Java에서는 시작 인덱스와 끝 인덱스를 직접 계산하며 부분 목록을 만듭니다. Kotlin에서는 창 크기 `size`, 이동 간격 `step`, 끝의 불완전한 창 포함 여부 `partialWindows`를 나눠 표현합니다. 세 인자의 조합이 결과 개수와 중복을 바꿉니다.
+
+Spring Batch의 청크 커밋 경계나 스트림 플랫폼의 시간 창과도 구분해야 합니다. 여기서는 입력 목록의 순서와 원소 개수만 사용합니다. 타임스탬프, 늦게 도착한 이벤트, 트랜잭션은 처리하지 않습니다.
+
+| 목적 | 설정 | 확인할 경계 |
+| --- | --- | --- |
+| 세 원소씩 겹쳐 관찰 | size=3, step=1 | 같은 원소 재사용 |
+| 세 원소씩 나누기 | size=3, step=3 | 마지막 구간 포함 여부 |
+| 띄엄띄엄 관찰 | size=2, step=3 | 사이 원소 누락 |
+
+어제의 [묶음 처리](/blog/posts/kotlin-chunked-batch-2026-11-20/)는 남은 원소를 마지막 묶음에 넣었습니다. `windowed`의 기본값은 불완전한 마지막 창을 버립니다. 이 차이를 호출부에서 명시해야 합니다.
+
+## 최소 실행 예제
+
+DB와 웹 서버가 필요 없는 Kotlin/JVM 예제입니다.
+
+```kotlin
+fun main() {
+    val values = listOf(1, 2, 3, 4, 5)
+    val windows = values.windowed(size = 3)
+    check(windows == listOf(listOf(1, 2, 3), listOf(2, 3, 4), listOf(3, 4, 5)))
+    check(values.windowed(3, step = 3) == listOf(listOf(1, 2, 3)))
+    check(values.windowed(3, step = 3, partialWindows = true) == values.chunked(3))
+    check(values.windowed(2, step = 3) == listOf(listOf(1, 2), listOf(4, 5)))
+    check(listOf(1, 2).windowed(3).isEmpty())
+    check(emptyList<Int>().windowed(3).isEmpty())
+    check(runCatching { values.windowed(0) }.isFailure)
+    check(runCatching { values.windowed(3, step = 0) }.isFailure)
+
+    val averages = values.windowed(3) { window -> window.average() }
+    check(averages == listOf(2.0, 3.0, 4.0))
+    val tail_sizes = values.windowed(3, partialWindows = true) { it.size }
+    check(tail_sizes == listOf(3, 3, 3, 2, 1))
+    val snapshots = values.windowed(3) { it.toList() }
+    check(snapshots == windows)
+    println("11 checks passed")
+}
+```
+
+Kotlin/JVM 2.4.21과 JDK 21에서 위 11개 check를 실행했습니다. 네트워크, DB, 실제 시계열 데이터는 검증 범위에 없습니다.
+
+## 결과를 API 계약으로 옮길 때
+
+설명용 입력 `{"values":[1,2,3,4,5],"size":3,"step":1}`의 결과는 위 세 구간입니다. 저장값은 변경 없음이며 실제 서비스 API를 추가한 예제가 아닙니다. 만약 각 구간을 원본 레코드 저장 명령으로 보낸다면 값 3은 세 번 등장합니다. 관찰과 쓰기 명령을 연결하기 전에 중복의 의미를 정해야 합니다.
+
+변환 람다에 전달되는 목록은 람다 안에서만 유효한 임시 목록입니다. 나중에 읽어야 한다면 `toList()`로 복사하고, 평균이나 합계만 필요하다면 그 자리에서 스칼라 값으로 변환합니다. 요소 객체까지 깊게 복사되는 것은 아닙니다.
+
+## Java 개발자가 자주 하는 오해
+
+`partialWindows=true`로 평균을 내면 끝의 평균은 두 개 또는 한 개 원소만 사용합니다. 같은 길이의 이동 평균으로 비교하려면 기본값을 유지하거나 구간 크기를 결과에 함께 기록합니다. 또한 목록이 시간순으로 정렬되어 있어도 세 원소가 반드시 3분을 뜻하지는 않습니다. 누락된 관측값과 불규칙한 간격은 별도로 다뤄야 합니다.
+
+`Iterable.windowed`는 결과를 목록으로 만듭니다. 입력이 커지면 전체 결과의 메모리 비용도 생각해야 합니다. 이 글은 성능 측정 없이 Sequence 전환이 빠르다고 주장하지 않습니다.
+
+## 연습 문제
+
+1. size=2, step=3인 결과를 펼쳐 어떤 원소가 빠졌는지 확인합니다.
+2. 마지막 두 창에 평균과 원소 개수를 함께 붙여 비교합니다.
+3. 원소에 시각을 붙이고, 개수 기준 창과 시간 기준 창이 달라지는 예를 작성합니다.

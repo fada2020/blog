@@ -9,21 +9,21 @@ test("홈에서 공개 글을 열 수 있다", async ({ page }) => {
 
   await page
     .locator(".featured-story")
-    .getByRole("link", { name: /두 돌 아이의 실내 주말/ })
+    .getByRole("link", { name: /AI주 급락과 한국 시장/ })
     .click();
 
   await expect(page).toHaveURL(
-    /\/blog\/posts\/toddler-indoor-weekend-2026-11-20\/$/,
+    /\/blog\/posts\/saturday-market-ai-drawdown-2026-11-21\/$/,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "두 돌 아이의 실내 주말",
+    "AI주 급락과 한국 시장",
   );
   const heroImage = page.locator(".hero img");
   await expect(heroImage).toHaveAttribute("data-image-component", "true");
   await expect(heroImage).toHaveAttribute("src", /^\/blog\/_image/);
   await expect(heroImage).toHaveAttribute(
     "alt",
-    "블록과 그림책과 작은 신발이 놓인 따뜻한 실내 놀이 공간 일러스트",
+    "세계 지도를 사이에 둔 시장 보드와 반도체 웨이퍼 및 유조선 일러스트",
   );
 });
 
@@ -71,12 +71,12 @@ test("가장 최근 글을 대표 글로, 이전 글을 최신 글 목록에 표
 
   await expect(
     page.locator(".featured-story").getByRole("link", {
-      name: /두 돌 아이의 실내 주말/,
+      name: /AI주 급락과 한국 시장/,
     }),
   ).toBeVisible();
   await expect(
     page.locator(".post-list").getByRole("link", {
-      name: /Kotlin 34강: 묶음 처리의 경계/,
+      name: /Kotlin 35강: 겹치는 구간 읽기/,
     }),
   ).toBeVisible();
 });
@@ -150,7 +150,7 @@ test("글 유형 링크로 학습 글을 모아볼 수 있다", async ({ page })
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("학습 글");
   await expect(
     page.getByRole("link", {
-      name: "Kotlin 30강: getOrPut과 동시성",
+      name: "Kotlin 31강: associateBy와 중복 키",
     }),
   ).toBeVisible();
 
